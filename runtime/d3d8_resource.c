@@ -318,7 +318,8 @@ int fam_stream_on(void);
 static int stream_rewritten(fam_buffer *b) {
     if (b->rewrites < 4 || !fam_stream_on()) return 0;
     if (b->rewrites == 4) {
-        fprintf(stderr, "[d3d8] %s %u KB rewritten every frame: streamed from now on\n", b->kind == FAM_RES_VB ? "VB" : "IB", b->size >> 10);
+        if (fam_config_int("stats", 0))
+            fprintf(stderr, "[d3d8] %s %u KB rewritten every frame: streamed from now on\n", b->kind == FAM_RES_VB ? "VB" : "IB", b->size >> 10);
         b->rewrites++;
     }
     b->dirty_hi = b->dirty_lo = 0;

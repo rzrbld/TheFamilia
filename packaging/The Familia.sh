@@ -44,7 +44,7 @@ fi
 export FAMILIA_USER_DIR="$CONFDIR"
 [ -f "$CONFDIR/familia.cfg" ] && source "$CONFDIR/familia.cfg"
 export FAMILIA_FPS=${FAMILIA_FPS:-1} FAMILIA_LIMIT=${FAMILIA_LIMIT:-0} FAMILIA_TEXTURES=${FAMILIA_TEXTURES:-32}
-export FAMILIA_STATS=${FAMILIA_STATS:-1}     # performance line in log.txt every 5 s (test phase)
+export FAMILIA_STATS=${FAMILIA_STATS:-0}     # 1: performance lines in log.txt every 5 s
 [ -f "$CONFDIR/dev.cfg" ] && source "$CONFDIR/dev.cfg"   # developer switches (e.g. FAMILIA_PROF=1)
 GPTK="$GAMEDIR/familia.gptk"
 [ -f "$CONFDIR/familia.gptk" ] && GPTK="$CONFDIR/familia.gptk"

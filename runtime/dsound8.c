@@ -253,8 +253,6 @@ static void f_b_Release(void) {
         RET(0, 1);
     }
     if (MEM32(self + 4) == 1) {
-        static int nfree;
-        if (nfree++ < 400) fprintf(stderr, "[dsound8] free buffer 0x%08X (%s)\n", self, g_cur_import ? g_cur_import : "?");
         uint64_t z = 0;
         sbuf *s = find(self);
         if (s) { if (s->obj3d) memcpy(hle_ptr(s->obj3d + 8), &z, 8); s->buf = 0; }
@@ -303,7 +301,6 @@ static void d3_AddRef(void) {
 }
 static void d3_Release(void) {                       /* the parent buffer's Release, same stack shape */
     uint32_t b = (uint32_t)(uintptr_t)fam_com_host(A32(0));
-    { static int n3; if (n3++ < 200) fprintf(stderr, "[dsound8] 3D Release 0x%08X -> buffer 0x%08X refs %u\n", A32(0), b, b ? MEM32(b + 4) : 0); }
     if (!b) RET(0, 1);
     MEM32(g_esp + 4) = b;
     f_b_Release();
