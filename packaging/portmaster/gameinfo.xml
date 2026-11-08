@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./The Familia.sh</path>
+    <name>The Familia (Mafia)</name>
+    <desc>Mafia: The City of Lost Heaven (2002) running natively on ARM64 handhelds through static recompilation. Requires your own copy of the game.</desc>
+    <releasedate>20020828T000000</releasedate>
+    <developer>Illusion Softworks</developer>
+    <publisher>Gathering of Developers</publisher>
+    <genre>Action/Adventure</genre>
+    <image>./the_familia/screenshot.png</image>
+  </game>
+</gameList>

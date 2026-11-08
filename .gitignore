@@ -1,0 +1,21 @@
+# Game files and anything derived from them never go into the repository
+original/
+work/
+build/
+dist/
+# Analysis output about the game's binaries (and names from the unlicensed mafia-re
+# decompilation, tools/mafia_re_names.py): local only
+analysis/
+# Python caches
+__pycache__/
+*.pyc
+# Development notes and analysis/benchmark helpers: local only
+docs/STATUS.md
+tests/
+tools/asm_of.py
+tools/dis.py
+tools/mafia_re_names.py
+tools/probe_table.py
+tools/rawiso.py
+tools/bench_summary.py
+tools/dev2_bench.sh

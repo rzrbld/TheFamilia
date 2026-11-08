@@ -1,0 +1,45 @@
+{
+ "ls3df": {
+  "1002D3A0": "fam_native_s_matrix_mul",
+  "1002E980": "fam_native_s_vector_mul_matrix",
+  "1001C360": "fam_native_get_child_frame",
+  "1001C9A0": "fam_native_update_children",
+  "1001CA60": "fam_native_frame_update",
+  "1001CC50": "fam_native_update_hr_bound_vol",
+  "1001CF90": "fam_native_update_hr_bound_vol_w",
+  "10041DF0": "fam_native_ctp_enum_first",
+  "10098830": "fam_native_strcmpi_ls3df",
+  "1008D9FA": "fam_native_cifmod_ls3df",
+  "10068360": "fam_native_transform_vertices",
+  "10068430": "fam_native_transform_vertices_blend",
+  "10067D20": "fam_native_env_process",
+  "10065A70": "fam_native_prepare_lights",
+  "1003C070": "fam_native_process_occluders",
+  "1003C2E0": "fam_native_cull_occls",
+  "1003C480": "fam_native_pois_enum",
+  "100160D0": "fam_native_shadow_tris_sw",
+  "1002E920": "fam_native_vec_mul_assign",
+  "1002EA10": "fam_native_vec_rot_by_matrix",
+  "1002E070": "fam_native_setrot3",
+  "10030140": "fam_native_quat_normalize",
+  "1002FEE0": "fam_native_quat_slerp",
+  "1001A6E0": "fam_native_update_matrix",
+  "1000DD60": "fam_native_vec_ctor",
+  "1000DDB0": "fam_native_vec_dot",
+  "100112A0": "fam_native_vec_mul_f",
+  "100112D0": "fam_native_vec_add",
+  "10054810": "fam_native_singlemesh_bvol"
+ },
+ "game": {
+  "0061D0B0": "fam_native_strcmpi_game",
+  "0061D000": "fam_native_strnicmp_game",
+  "00402A30": "fam_native_svec_ctor",
+  "00407570": "fam_native_svec_dot",
+  "0040ADD0": "fam_native_svec_mul_f",
+  "005C5040": "fam_native_coll_sweep",
+  "0055D460": "fam_native_play_logo"
+ },
+ "rw_data": {
+  "110025C0": "fam_native_dta_read"
+ }
+}

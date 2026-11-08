@@ -1,0 +1,34 @@
+{
+  "version": 4,
+  "name": "the_familia.zip",
+  "items": [
+    "The Familia.sh",
+    "the_familia/"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "The Familia (Mafia)",
+    "porter": [
+      "rzrbld"
+    ],
+    "desc": "Beta. Mafia: The City of Lost Heaven (2002, v1.2) statically recompiled to ARM64, with OpenGL ES rendering and the original videos. Your own copy of the game is required. About 25-30 FPS in the city on the H700; a full playthrough is not yet verified.",
+    "desc_md": null,
+    "inst": "Copy The Familia.sh into your Ports folder and the_familia into ports. Put your own Mafia files in the_familia/source: the three CD images (.bin+.cue or .iso), mafia_patch_1.2_eng.exe and an unprotected 1.2 Game.exe (loose or in a .rar/.zip/.7z). Start The Familia: the first run imports them (about 2 GB, several minutes). See README.md.",
+    "inst_md": null,
+    "genres": [
+      "action",
+      "adventure"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "commercial",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": "2.36"
+  }
+}
