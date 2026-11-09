@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
     { void fam_crash_install(void); fam_crash_install(); }
     fam_paths_init(game);
     game = ".";                      /* fam_paths_init made the game dir current */
+    { void fam_readahead_start(void); fam_readahead_start(); }   /* learned archive read-ahead */
     hle_mem_init();
     recomp_host_init();
     fam_register_shims();

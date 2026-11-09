@@ -57,6 +57,56 @@ static uint32_t fnv(const char *a, size_t al, const char *b, size_t bl) {
     for (size_t i = 0; i < bl; i++) h = (h ^ (unsigned char)b[i]) * 16777619u;
     return h;
 }
+/* [familia] Directory listings, read once and kept until the file system changes
+ * (hle_path_gen): a name not found as given is looked up without case in its
+ * directory's listing instead of reading the directory again. LS3D looks for
+ * every texture as a loose file under Maps\ (the overlay's Maps\ holds its
+ * converted .555/.565 copies); each miss re-read that directory from the SD card. */
+#define DCACHE 32
+typedef struct { unsigned gen; char path[512]; char **names; int n; } dir_listing;
+static dir_listing g_dc[DCACHE];
+static int g_dc_next;
+/* the listing's answer when that directory's listing is cached (*cached = 1): the exact name
+ * first, else one that differs only in case */
+static const char *dir_find_cached(const char *dir, const char *want, int *cached) {
+    *cached = 0;
+    for (int i = 0; i < DCACHE; i++)
+        if (g_dc[i].gen == hle_path_gen && !strcmp(g_dc[i].path, dir)) {
+            dir_listing *L = &g_dc[i];
+            *cached = 1;
+            for (int k = 0; k < L->n; k++) if (!strcmp(L->names[k], want)) return L->names[k];
+            for (int k = 0; k < L->n; k++) if (!strcasecmp(L->names[k], want)) return L->names[k];
+            return NULL;
+        }
+    return NULL;
+}
+static const char *dir_find(const char *dir, const char *want) {
+    dir_listing *L = NULL;
+    for (int i = 0; i < DCACHE; i++) if (g_dc[i].gen == hle_path_gen && !strcmp(g_dc[i].path, dir)) { L = &g_dc[i]; break; }
+    if (!L) {
+        if (strlen(dir) >= sizeof L->path) {           /* too long to cache: scan */
+            DIR *d = opendir(dir); static char nm[256]; const char *r = NULL;
+            if (d) { struct dirent *e; while ((e = readdir(d))) if (!strcasecmp(e->d_name, want)) { snprintf(nm, sizeof nm, "%s", e->d_name); r = nm; break; } closedir(d); }
+            return r;
+        }
+        L = &g_dc[g_dc_next]; g_dc_next = (g_dc_next + 1) % DCACHE;
+        for (int i = 0; i < L->n; i++) free(L->names[i]);
+        free(L->names); L->names = NULL; L->n = 0;
+        snprintf(L->path, sizeof L->path, "%s", dir);
+        L->gen = hle_path_gen;
+        DIR *d = opendir(dir);
+        if (d) {
+            int cap = 0; struct dirent *e;
+            while ((e = readdir(d))) {
+                if (L->n == cap) { cap = cap ? cap * 2 : 64; L->names = realloc(L->names, (size_t)cap * sizeof *L->names); }
+                L->names[L->n++] = strdup(e->d_name);
+            }
+            closedir(d);
+        }
+    }
+    for (int i = 0; i < L->n; i++) if (!strcasecmp(L->names[i], want)) return L->names[i];
+    return NULL;
+}
 static int join_component_uncached(char *out, size_t n, const char *comp, size_t clen);
 static int join_component(char *out, size_t n, const char *comp, size_t clen) {
     size_t len = strlen(out);
@@ -96,18 +146,17 @@ static int join_component_uncached(char *out, size_t n, const char *comp, size_t
     memcpy(want, comp, clen), want[clen] = 0;
     const char *sep = len && out[len - 1] != '/' ? "/" : "";
     snprintf(out + len, n - len, "%s%s", sep, want);
+    out[len] = 0;
+    int cached = 0;
+    const char *hit = dir_find_cached(len ? out : ".", want, &cached);   /* a listing read already: no disk access */
+    if (cached) { snprintf(out + len, n - len, "%s%s", sep, hit ? hit : want); return hit != NULL; }
+    snprintf(out + len, n - len, "%s%s", sep, want);
     struct stat st;
     if (lstat(out[0] ? out : ".", &st) == 0) return 1;
     out[len] = 0;
-    DIR *d = opendir(len ? out : ".");
-    int found = 0;
-    if (d) {
-        struct dirent *e;
-        while ((e = readdir(d)))
-            if (!strcasecmp(e->d_name, want)) { snprintf(out + len, n - len, "%s%s", sep, e->d_name); found = 1; break; }
-        closedir(d);
-    }
-    if (!found) snprintf(out + len, n - len, "%s%s", sep, want);
+    hit = dir_find(len ? out : ".", want);
+    int found = hit != NULL;
+    snprintf(out + len, n - len, "%s%s", sep, found ? hit : want);
     return found;
 }
 

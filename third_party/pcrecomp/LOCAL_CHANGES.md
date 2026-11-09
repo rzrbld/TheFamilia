@@ -27,3 +27,6 @@ Every local edit is marked `[familia]` in the source.
 - recomp32/recomp_types.h + win32hle/host_lite.c: inline dispatch-cache hit path recomp_lookup_fast in RECOMP_ICALL/ITAIL; manual-override call dropped [familia]
 
 - `win32hle/host_lite.c` `recomp_lookup`: VAs in the shim range (>= 0x7F000000) return NULL at once, so indirect calls into shims skip a failing binary search before `recomp_lookup_import`.
+- `win32hle/kernel32_ext.c` `FindFirstFileA`: names without wildcards that were not found are remembered until `hle_path_gen` changes (LS3D probes every maps directory for each texture); `.ini` writes and `_lcreat` bump `hle_path_gen`; time and call counters for the stutter report.
+- `win32hle/hle_path.c`: directory listings cached (32 directories, until `hle_path_gen` changes) for case-insensitive lookups of names not found as given.
+- `win32hle/kernel32_ext.c` `ReadFile`: calls the weak `hle_read_hook(fd, offset, bytes)` after each read (the port's archive read-ahead); `HLE_READTRACE=1` logs reads over 2 ms.

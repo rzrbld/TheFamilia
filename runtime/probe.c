@@ -69,9 +69,9 @@ void fam_probe_report(double frames) {
 
 /* Once per presented frame: when the frame took longer than FAMILIA_SPIKE ms,
  * print what the timed functions and file I/O spent in that frame. */
-extern uint64_t hle_io_read_ns, hle_io_read_bytes, hle_io_open_ns, hle_io_opens, fam_glt_wait_ns;
+extern uint64_t hle_io_read_ns, hle_io_read_bytes, hle_io_open_ns, hle_io_opens, fam_glt_wait_ns, hle_find_ns, hle_finds;
 void fam_probe_frame(double frame_ms) {
-    static uint64_t last[MAXP], lr_ns, lr_b, lo_ns, lo_n, lw;
+    static uint64_t last[MAXP], lr_ns, lr_b, lo_ns, lo_n, lw, lf_ns, lf_n;
     if (g_spike_ms <= 0) return;
     if (frame_ms > g_spike_ms) {
         double ms = 1000.0 / tick_hz();
@@ -84,6 +84,7 @@ void fam_probe_frame(double frame_ms) {
         fprintf(stderr, "[spike] %.1f ms frame | file read %.1f ms (%llu KB) open %.1f ms (%llu files)", frame_ms,
                 (double)(hle_io_read_ns - lr_ns) / 1e6, (unsigned long long)((hle_io_read_bytes - lr_b) >> 10),
                 (double)(hle_io_open_ns - lo_ns) / 1e6, (unsigned long long)(hle_io_opens - lo_n));
+        fprintf(stderr, " find %.1f ms (%llu)", (double)(hle_find_ns - lf_ns) / 1e6, (unsigned long long)(hle_finds - lf_n));
         { char ops[512]; void fam_glt_sync_report(char *, size_t); fam_glt_sync_report(ops, sizeof ops);
           fprintf(stderr, " | GL sync wait %.1f ms:%s", (double)(fam_glt_wait_ns - lw) / 1e6, ops); }
         for (int a = 0; a < n && a < 8; a++) fprintf(stderr, " | %s %.1f", fam_probe_names[idx[a]], val[a]);
@@ -91,5 +92,5 @@ void fam_probe_frame(double frame_ms) {
     }
     if (frame_ms <= g_spike_ms) { char ops[512]; void fam_glt_sync_report(char *, size_t); fam_glt_sync_report(ops, sizeof ops); }
     for (int i = 0; i < fam_probe_count && i < MAXP; i++) last[i] = g_p[i].ticks;
-    lr_ns = hle_io_read_ns; lr_b = hle_io_read_bytes; lo_ns = hle_io_open_ns; lo_n = hle_io_opens; lw = fam_glt_wait_ns;
+    lf_ns = hle_find_ns; lf_n = hle_finds; lr_ns = hle_io_read_ns; lr_b = hle_io_read_bytes; lo_ns = hle_io_open_ns; lo_n = hle_io_opens; lw = fam_glt_wait_ns;
 }

@@ -71,6 +71,12 @@ Pentiums, so the hottest code paths are replaced or reorganised:
 - **Shader cache:** the shader variants the game needs are recorded in
   `conf/shaders.bin` and built at startup, starting from the shipped
   `shaders.seed`.
+- **Learned archive read-ahead** (`readahead.c`): the 64 KB blocks of the `.dta` archives the
+  game reads are remembered in `conf/readahead.txt`; at the next start a low-priority thread
+  reads them into the page cache during the menus and loading, so a first drive through the
+  city no longer waits on the SD card (FAT32, about 3 ms per small random read).
+- **File lookups**: directory listings are cached, since LS3D looks for every texture as a
+  loose file in each maps directory before reading the archive.
 - **Profile-guided optimisation** of the whole binary (`tools/pgo.sh`).
 
 The engine's function names and structure layouts come from our own reading of

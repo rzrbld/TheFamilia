@@ -22,6 +22,8 @@
 #include <sys/mman.h>
 #include "win32hle.h"
 extern volatile unsigned hle_path_gen;   /* [familia] hle_path.c lookup cache generation */
+/* [familia] every completed ReadFile (fd, offset, bytes), for the port's archive read-ahead */
+__attribute__((weak)) void hle_read_hook(int fd, uint64_t off, uint32_t len);
 
 #ifdef __APPLE__                 /* struct stat's times by their BSD names */
 #define st_mtim st_mtimespec
@@ -169,7 +171,18 @@ static void k_ReadFile(void) {                           /* (h,buf,n,&read,ovl) 
         if (r <= 0) break;
         got += (uint32_t)r;
     }
-    hle_io_read_ns += io_now() - t0; hle_io_read_bytes += got;
+    uint64_t dt = io_now() - t0;
+    hle_io_read_ns += dt; hle_io_read_bytes += got;
+    if (hle_read_hook && got) hle_read_hook(fd, (uint64_t)lseek(fd, 0, SEEK_CUR) - got, got);
+    {   /* [familia] HLE_READTRACE=1: every read over 2 ms (file, offset, size, time) */
+        static int tr = -1; if (tr < 0) tr = getenv("HLE_READTRACE") != NULL;
+        if (tr && dt > 2000000) {
+            char lp[64], fn[512]; snprintf(lp, sizeof lp, "/proc/self/fd/%d", fd);
+            ssize_t k = readlink(lp, fn, sizeof fn - 1); fn[k > 0 ? k : 0] = 0;
+            const char *b = strrchr(fn, '/');
+            fprintf(stderr, "[read] %s @%lld %u bytes %.1f ms\n", b ? b + 1 : fn, (long long)lseek(fd, 0, SEEK_CUR) - got, got, dt / 1e6);
+        }
+    }
     if (pr) *pr = got;
     RET(1, 5);                                           /* EOF is success with 0 read */
 }
@@ -497,7 +510,40 @@ static int find_next(hfind *f, uint32_t out) {
     return 1;
 }
 
-static void k_FindFirstFileA(void) {                     /* (pattern, &data) */
+uint64_t hle_find_ns, hle_finds;                        /* [familia] FindFirstFileA time and calls (stutter report) */
+static void k_FindFirstFileA_impl(void);
+/* [familia] Names without wildcards that were not found, remembered until the file system
+ * changes (hle_path_gen, which every create/delete/rename/mkdir bumps). LS3D looks for each
+ * texture as a loose file in every maps directory before it reads the archive; each miss
+ * resolved the path through the overlay with directory scans (about 0.7 ms on an SD card). */
+#define FIND_MISS 1024
+static struct { unsigned gen; uint32_t hash; char key[256]; } g_find_miss[FIND_MISS];
+static uint32_t find_hash(const char *s) { uint32_t h = 2166136261u; for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u; return h; }
+static void k_FindFirstFileA(void) {
+    struct timespec a, b; clock_gettime(CLOCK_MONOTONIC, &a);
+    const char *pat = ASTR(0);
+    int cacheable = pat && !strpbrk(pat, "*?") && strlen(pat) < 256;
+    uint32_t h = cacheable ? find_hash(pat) : 0;
+    unsigned gen = hle_path_gen;
+    if (cacheable) {
+        typeof(g_find_miss[0]) *e = &g_find_miss[h % FIND_MISS];
+        if (e->gen == gen && e->hash == h && !strcmp(e->key, pat)) {
+            hle_set_last_error(ERROR_FILE_NOT_FOUND);
+            clock_gettime(CLOCK_MONOTONIC, &b);
+            hle_find_ns += (uint64_t)(b.tv_sec - a.tv_sec) * 1000000000ull + (uint64_t)(b.tv_nsec - a.tv_nsec); hle_finds++;
+            RET(INVALID_HANDLE, 2);
+        }
+    }
+    char key[256]; if (cacheable) strcpy(key, pat);       /* the impl pops the arguments */
+    k_FindFirstFileA_impl();
+    if (cacheable && g_eax == INVALID_HANDLE && hle_path_gen == gen) {
+        typeof(g_find_miss[0]) *e = &g_find_miss[h % FIND_MISS];
+        e->gen = gen; e->hash = h; strcpy(e->key, key);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    hle_find_ns += (uint64_t)(b.tv_sec - a.tv_sec) * 1000000000ull + (uint64_t)(b.tv_nsec - a.tv_nsec); hle_finds++;
+}
+static void k_FindFirstFileA_impl(void) {                /* (pattern, &data) */
     static int closer_set;
     if (!closer_set) hle_handle_set_closer(HLE_H_FIND, find_closer), closer_set = 1;
     const char *pat = ASTR(0);
@@ -588,6 +634,7 @@ static FILE *ini_open(const char *file, const char *mode) {
     char path[1024];
     if (!file) return NULL;
     hle_host_path(file, path, sizeof path);
+    if (mode[0] != 'r') hle_path_gen++;                 /* [familia] a write may create the file */
     return fopen(path, mode);
 }
 static int ini_find_section(FILE *f, const char *section) {
@@ -649,6 +696,7 @@ static void k_WritePrivateProfileStringA(void) {         /* (sec,key,val,file) *
 static uint32_t lopen_common(const char *name, int fl, int create) {
     char path[1024];
     hle_host_path(name, path, sizeof path);
+    if (create) hle_path_gen++;                         /* [familia] */
     int fd = open(path, fl | O_CLOEXEC | (create ? (O_CREAT | O_TRUNC) : 0), 0644);
     if (hle_filetrace()) fprintf(stderr, "[file] _lopen \"%s\" -> %s %s\n", name, path, fd >= 0 ? "ok" : strerror(errno));
     if (fd < 0) { hle_set_last_error(errno_to_win(errno)); return INVALID_HANDLE; }
