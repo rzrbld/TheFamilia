@@ -9,12 +9,11 @@
  * Window messages for the guest (WM_KEYDOWN/UP, WM_CHAR, WM_CLOSE) are posted
  * to the device window, since menus and text entry read those.
  *
- * Controller: on PortMaster, gptokeyb turns the pad into keyboard + mouse
- * events (packaging/familia.gptk), so the game never opens the controller
- * itself (no duplicate input). FAMILIA_PAD=1 enables the built-in table
- * below instead, for desktop testing without gptokeyb: SDL controller
- * inputs to DIK keys / mouse actions. Sticks use a dead zone; the right stick drives
- * mouse motion with an acceleration curve, scaled by FAMILIA_LOOK_SPEED.
+ * Controller (see "the game controller" below): a DirectInput joystick for
+ * the game, plus mouse look, Esc and menu keys from the engine. On PortMaster
+ * gptokeyb2 -x presents it as a virtual Xbox 360 pad. FAMILIA_PAD=0 turns the
+ * controller off. Every key or button press is latched until the game's next
+ * state read, so a tap between two polls is not lost.
  */
 #include <stdlib.h>
 #include <math.h>
@@ -32,9 +31,11 @@
 
 static uint8_t g_kb_real[256], g_kb_pad[256];
 static fam_mouse g_mouse;
+static uint8_t g_mouse_latch;
 static fam_key_event g_q[256];
 static unsigned g_qh, g_qt;
 static SDL_GameController *g_pad;
+static int g_pad_on;
 static uint32_t g_seq;
 static int g_quit_posted;
 
@@ -97,18 +98,20 @@ static void key_event(uint8_t dik, int down) {
         hle_post_message(g_dev.hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, lp);
     }
 }
-static uint8_t g_kb_script[256];
+static uint8_t g_kb_script[256], g_kb_latch[256];
 static void set_key(uint8_t *arr, uint8_t dik, int down) {
     uint8_t before = g_kb_real[dik] | g_kb_pad[dik] | g_kb_script[dik];
     arr[dik] = down ? 0x80 : 0;
     uint8_t after = g_kb_real[dik] | g_kb_pad[dik] | g_kb_script[dik];
+    if (after && !before) g_kb_latch[dik] = 0x80;     /* seen by the next state read even if released before it */
     if (before != after) key_event(dik, after != 0);
 }
 
 /* ---- scripted input (development: automated benchmark runs) ----
  * FAMILIA_INPUT_SCRIPT="T:KEY[:HOLD],..."  T = seconds since start, KEY a name
  * below or a DIK code in hex (0x1C), HOLD = seconds held (default 0.15). */
-typedef struct { uint32_t at_ms, up_ms; uint8_t dik, state; } script_key;
+typedef struct { uint32_t at_ms, up_ms; uint8_t dik, state, pad; } script_key;   /* pad: a controller button + 1 */
+static uint32_t g_pad_script, g_pad_latch, g_pad_latch_engine;
 static script_key g_script[256];
 static int g_nscript;
 static uint32_t g_script_t0;
@@ -129,8 +132,12 @@ static void script_init(void) {
     for (char *save = NULL, *tok = strtok_r(buf, ", ", &save); tok && g_nscript < 256; tok = strtok_r(NULL, ", ", &save)) {
         char name[32] = ""; double t = 0, hold = 0.15;
         if (sscanf(tok, "%lf:%31[^:]:%lf", &t, name, &hold) < 2) continue;
-        uint8_t d = dik_named(name);
-        if (d) g_script[g_nscript++] = (script_key){ (uint32_t)(t * 1000), (uint32_t)((t + hold) * 1000), d, 0 };
+        static const char *pads[] = { "pad_a", "pad_b", "pad_x", "pad_y", "pad_lb", "pad_rb", "pad_back", "pad_start",
+                                      "pad_l3", "pad_r3", "pad_lt", "pad_rt", "pad_up", "pad_down", "pad_left", "pad_right" };
+        uint8_t pad = 0;
+        for (int i = 0; i < 16; i++) if (!strcmp(name, pads[i])) pad = (uint8_t)(i + 1);
+        uint8_t d = pad ? 0 : dik_named(name);
+        if (d || pad) g_script[g_nscript++] = (script_key){ (uint32_t)(t * 1000), (uint32_t)((t + hold) * 1000), d, 0, pad };
     }
     g_script_t0 = SDL_GetTicks();
     fprintf(stderr, "[input] script: %d key presses\n", g_nscript);
@@ -139,70 +146,148 @@ static void script_update(void) {
     uint32_t now = SDL_GetTicks() - g_script_t0;
     for (int i = 0; i < g_nscript; i++) {
         script_key *k = &g_script[i];
-        if (k->state == 0 && now >= k->at_ms) { k->state = 1; set_key(g_kb_script, k->dik, 1);
-                                                 fprintf(stderr, "[input] script %.1fs key %02X\n", now / 1000.0, k->dik); }
-        if (k->state == 1 && now >= k->up_ms) { k->state = 2; set_key(g_kb_script, k->dik, 0); }
+        if (k->state == 0 && now >= k->at_ms) {
+            k->state = 1;
+            if (k->pad) { uint32_t bit = 1u << (k->pad - 1); g_pad_script |= bit; g_pad_latch |= bit; g_pad_latch_engine |= bit; }
+            else set_key(g_kb_script, k->dik, 1);
+            fprintf(stderr, "[input] script %.1fs %s %02X\n", now / 1000.0, k->pad ? "pad" : "key", k->pad ? k->pad - 1 : k->dik);
+        }
+        if (k->state == 1 && now >= k->up_ms) { k->state = 2; if (k->pad) g_pad_script &= ~(1u << (k->pad - 1)); else set_key(g_kb_script, k->dik, 0); }
     }
 }
 
-/* ---- controller mapping ----
- * Defaults target the game's stock keyboard layout (README lists the
- * buttons). Kinds: KEY = hold a DIK key; MB = mouse button; AXIS_KEY = an axis
- * direction past the dead zone holds a key. */
-enum { M_KEY, M_MB, M_AXIS_NEG, M_AXIS_POS };
-typedef struct { int kind; int src; uint8_t dik; int mb; } pad_map;
-#define BTN(b, k)    { M_KEY, SDL_CONTROLLER_BUTTON_##b, k, -1 }
-#define BTNMB(b, m)  { M_MB, SDL_CONTROLLER_BUTTON_##b, 0, m }
-#define AXN(a, k)    { M_AXIS_NEG, SDL_CONTROLLER_AXIS_##a, k, -1 }
-#define AXP(a, k)    { M_AXIS_POS, SDL_CONTROLLER_AXIS_##a, k, -1 }
-static pad_map k_pad_map[] = {
-    AXN(LEFTY, 0xC8), AXP(LEFTY, 0xD0), AXN(LEFTX, 0xCB), AXP(LEFTX, 0xCD),   /* move / drive: arrows */
-    BTN(DPAD_UP, 0xC8), BTN(DPAD_DOWN, 0xD0), BTN(DPAD_LEFT, 0xCB), BTN(DPAD_RIGHT, 0xCD),
-    BTN(A, 0x1C),            /* A: enter / action */
-    BTN(B, 0x39),            /* B: space (jump / handbrake) */
-    BTN(X, 0x13),            /* X: R (reload) */
-    BTN(Y, 0x12),            /* Y: E (enter / exit car, use) */
-    BTN(START, 0x01),        /* Start: Esc (pause menu) */
-    BTN(BACK, 0x0F),         /* Select: Tab (map) */
-    BTN(LEFTSHOULDER, 0x10), /* LB: Q (previous weapon / look left) */
-    BTN(RIGHTSHOULDER, 0x11),/* RB: W? reserved; remapped in config */
-    BTN(LEFTSTICK, 0x2A),    /* L3: shift (walk / run toggle) */
-    BTN(RIGHTSTICK, 0x1D),   /* R3: ctrl (crouch) */
-    AXP(TRIGGERLEFT, 0x00),  /* LT: right mouse (aim) - see mouse handling below */
-    AXP(TRIGGERRIGHT, 0x00), /* RT: left mouse (fire) */
-};
-#define NMAP (sizeof k_pad_map / sizeof *k_pad_map)
-
+/* ---- the game controller ----
+ * The pad reaches the game as a DirectInput joystick (dinput8.c, read by
+ * IJoy.dll through fam_pad_read), so the game's own controls apply: separate
+ * on-foot and car bindings, analog steering and pedals, rebinding in
+ * Options > Controls. On PortMaster, gptokeyb2 -x mirrors the handheld's
+ * controls as a virtual Xbox 360 pad (045E:028E), which is preferred over the
+ * physical device so every handheld looks the same.
+ * The engine adds what the game has no binding for: right stick -> mouse
+ * (looking and aiming use the mouse), Start -> Esc, and while a menu is open
+ * A / B / d-pad / left stick -> Enter / Esc / arrows. */
+#define GAME_MISSION 0x63788Cu        /* C_mission *act_mission */
+#define GAME_MENU    0x6BD890u        /* GM_Menu::activeMenuWindow */
+static int pad_score(int index) {
+    if (!SDL_IsGameController(index)) return 0;
+    return SDL_JoystickGetDeviceVendor(index) == 0x045E && SDL_JoystickGetDeviceProduct(index) == 0x028E ? 2 : 1;
+}
+static void pad_open_best(void) {
+    int best = -1, score = 0;
+    for (int i = 0; i < SDL_NumJoysticks(); i++) { int sc = pad_score(i); if (sc >= score && sc > 0) best = i, score = sc; }
+    if (best < 0) return;
+    SDL_GameController *c = SDL_GameControllerOpen(best);
+    if (!c) return;
+    if (c == g_pad) { SDL_GameControllerClose(c); return; }   /* already ours: drop the extra reference */
+    if (g_pad) SDL_GameControllerClose(g_pad);
+    g_pad = c;
+    fprintf(stderr, "[input] controller: %s%s\n", SDL_GameControllerName(c), score == 2 ? " (gptokeyb)" : "");
+}
+static uint32_t pad_bit_of(int sdl_button) {
+    switch (sdl_button) {
+    case SDL_CONTROLLER_BUTTON_A: return 1u << FAM_PB_A; case SDL_CONTROLLER_BUTTON_B: return 1u << FAM_PB_B;
+    case SDL_CONTROLLER_BUTTON_X: return 1u << FAM_PB_X; case SDL_CONTROLLER_BUTTON_Y: return 1u << FAM_PB_Y;
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return 1u << FAM_PB_LB; case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return 1u << FAM_PB_RB;
+    case SDL_CONTROLLER_BUTTON_BACK: return 1u << FAM_PB_BACK; case SDL_CONTROLLER_BUTTON_START: return 1u << FAM_PB_START;
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: return 1u << FAM_PB_L3; case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return 1u << FAM_PB_R3;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP: return 1u << FAM_PB_UP; case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return 1u << FAM_PB_DOWN;
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return 1u << FAM_PB_LEFT; case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return 1u << FAM_PB_RIGHT;
+    }
+    return 0;
+}
+#define TRIGGER_ON 12000
+/* g_pad_latch: buttons pressed since the game last read them; g_pad_latch_engine: the same for
+ * the engine's own keys below; g_pad_script: buttons the input script holds */
+static uint32_t pad_held(void) {
+    if (!g_pad) return g_pad_script;
+    uint32_t b = g_pad_script;
+    for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++) if (SDL_GameControllerGetButton(g_pad, (SDL_GameControllerButton)i)) b |= pad_bit_of(i);
+    if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > TRIGGER_ON) b |= 1u << FAM_PB_LT;
+    if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > TRIGGER_ON) b |= 1u << FAM_PB_RT;
+    return b;
+}
+/* a stick with a radial dead zone, rescaled to -10000..10000 */
+static void stick(SDL_GameControllerAxis ax, SDL_GameControllerAxis ay, int32_t *ox, int32_t *oy) {
+    float x = SDL_GameControllerGetAxis(g_pad, ax) / 32767.f, y = SDL_GameControllerGetAxis(g_pad, ay) / 32767.f;
+    float m = sqrtf(x * x + y * y), dz = 0.2f;
+    if (m <= dz) { *ox = *oy = 0; return; }
+    float k = (m > 1.f ? 1.f : m) - dz; k = k / (1.f - dz) / m;
+    *ox = (int32_t)(x * k * 10000.f); *oy = (int32_t)(y * k * 10000.f);
+}
+int fam_pad_present(void) { return g_pad != NULL; }
+void fam_pad_read(fam_pad *p) {
+    memset(p, 0, sizeof *p);
+    if (!g_pad && !g_pad_script) return;
+    stick(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &p->lx, &p->ly);
+    stick(SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, &p->rx, &p->ry);
+    p->lt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) * 10000 / 32767;
+    p->rt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) * 10000 / 32767;
+    if (g_pad_script & (1u << FAM_PB_LT)) p->lt = 10000;             /* scripted triggers are pulled fully */
+    if (g_pad_script & (1u << FAM_PB_RT)) p->rt = 10000;
+    p->buttons = pad_held() | g_pad_latch;           /* a tap between two polls still counts once */
+    g_pad_latch = 0;
+}
+/* whether the game shows a menu (main menu, pause menu, loading) rather than play */
+static int in_menu(void) {
+    if (MEM32(GAME_MENU)) return 1;
+    uint32_t mis = MEM32(GAME_MISSION), game = mis ? MEM32(mis + 0x24) : 0;
+    return !game || !MEM32(game + 0xE4);               /* no player */
+}
 static void pad_update(void) {
     if (!g_pad) return;
-    const int dz = 9000;
+    uint32_t b = pad_held() | g_pad_latch_engine;
+    g_pad_latch_engine = 0;
     uint8_t want[256] = {0};
-    for (size_t i = 0; i < NMAP; i++) {
-        const pad_map *m = &k_pad_map[i];
-        int on = 0;
-        if (m->kind == M_KEY) on = SDL_GameControllerGetButton(g_pad, (SDL_GameControllerButton)m->src);
-        else if (m->kind == M_AXIS_NEG) on = SDL_GameControllerGetAxis(g_pad, (SDL_GameControllerAxis)m->src) < -dz;
-        else if (m->kind == M_AXIS_POS) on = SDL_GameControllerGetAxis(g_pad, (SDL_GameControllerAxis)m->src) > dz;
-        if (on && m->dik) want[m->dik] = 0x80;
+    if (b & (1u << FAM_PB_START)) want[0x01] = 0x80;                 /* Start: Esc */
+    if (in_menu()) {
+        g_pad_latch = 0;                               /* menu presses are not replayed into play */
+        int32_t lx, ly; stick(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &lx, &ly);
+        if (b & (1u << FAM_PB_A)) want[0x1C] = 0x80;                 /* Enter */
+        if (b & (1u << FAM_PB_B)) want[0x01] = 0x80;                 /* Esc */
+        if ((b & (1u << FAM_PB_UP)) || ly < -5000) want[0xC8] = 0x80;
+        if ((b & (1u << FAM_PB_DOWN)) || ly > 5000) want[0xD0] = 0x80;
+        if ((b & (1u << FAM_PB_LEFT)) || lx < -5000) want[0xCB] = 0x80;
+        if ((b & (1u << FAM_PB_RIGHT)) || lx > 5000) want[0xCD] = 0x80;
     }
     for (int k = 0; k < 256; k++) if (want[k] != g_kb_pad[k]) set_key(g_kb_pad, (uint8_t)k, want[k] != 0);
-    /* triggers -> mouse buttons; right stick -> mouse motion */
-    int lt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 12000;
-    int rt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000;
-    g_mouse.pad_buttons = (uint8_t)((rt ? 1 : 0) | (lt ? 2 : 0));
-    static float speed = -1;
-    if (speed < 0) speed = (float)fam_config_int("look_speed", 100) / 100.f;
-    float rx = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.f;
-    float ry = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.f;
-    float mag = sqrtf(rx * rx + ry * ry);
-    if (mag > 0.18f) {
-        float t = (mag - 0.18f) / 0.82f, curve = t * t * 18.f * speed;   /* pixels per poll at full tilt */
-        g_mouse.acc_x += rx / mag * curve;
-        g_mouse.acc_y += ry / mag * curve;
+    /* right stick -> mouse motion, by time: FAMILIA_LOOK_SENS percent of 1500 px/s at full tilt */
+    static int look = -1; static uint64_t last;
+    if (look < 0) look = fam_config_int("look_sens", 30);
+    uint64_t now = SDL_GetTicks64();
+    float dt = last ? (float)(now - last) / 1000.f : 0.f;
+    last = now;
+    if (dt > 0.1f) dt = 0.1f;
+    int32_t rx, ry; stick(SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, &rx, &ry);
+    float fx = rx / 10000.f, fy = ry / 10000.f, m = sqrtf(fx * fx + fy * fy);
+    if (m > 0.f) {
+        float speed = m * m * 1500.f * (float)look / 100.f * dt / m;    /* quadratic response */
+        g_mouse.acc_x += fx * speed; g_mouse.acc_y += fy * speed;
     }
+}
+
+/* development: the game state the controller layer reads (FAMILIA_PADDBG=1) */
+static void pad_debug(void) {
+    static uint32_t last; uint32_t now = SDL_GetTicks();
+    if (now - last < 250) return;
+    last = now;
+    uint32_t mis = MEM32(0x63788Cu), game = mis ? MEM32(mis + 0x24) : 0, pl = game ? MEM32(game + 0xE4) : 0;
+    uint32_t car = pl ? MEM32(pl + 0x98) : 0, menu = MEM32(0x6BD890u);
+    uint32_t ctl = MEM32(0x647C30u + 0xB4), val = MEM32(0x647C30u + 0xC4), prs = MEM32(0x647C30u + 0xD4);
+    fprintf(stderr, "[paddbg] mission %08X game %08X player %08X car %08X menu %08X | joys %08X..%08X", mis, game, pl, car, menu,
+            MEM32(0x647C30u + 8), MEM32(0x647C30u + 12));
+    if (ctl && val) {
+        for (int i = 0x0A; i <= 0x0B; i++) {
+            float v, pv; uint32_t a = MEM32(val + i * 4), b = prs ? MEM32(prs + i * 4) : 0; memcpy(&v, &a, 4); memcpy(&pv, &b, 4);
+            fprintf(stderr, " | ctl%02X half %u dev %u code %03X value %.2f pressed %.2f", i, MEM32(ctl + i * 12), MEM16(ctl + i * 12 + 4), MEM16(ctl + i * 12 + 6), v, pv);
+        }
+    }
+    if (game) { float pp[3]; memcpy(pp, hle_ptr(game + 0x2A10), 12); fprintf(stderr, " | pos %.1f %.1f %.1f", pp[0], pp[1], pp[2]); }
+    fprintf(stderr, "\n");
 }
 
 void fam_input_pump(void) {
+    static int dbg = -1; if (dbg < 0) dbg = fam_config_int("paddbg", 0);
+    if (dbg) pad_debug();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
@@ -224,17 +309,26 @@ void fam_input_pump(void) {
         case SDL_MOUSEMOTION: g_mouse.acc_x += (float)e.motion.xrel; g_mouse.acc_y += (float)e.motion.yrel; break;
         case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: {
             int b = e.button.button == SDL_BUTTON_LEFT ? 0 : e.button.button == SDL_BUTTON_RIGHT ? 1 : e.button.button == SDL_BUTTON_MIDDLE ? 2 : -1;
-            if (b >= 0) { if (e.type == SDL_MOUSEBUTTONDOWN) g_mouse.real_buttons |= (uint8_t)(1 << b); else g_mouse.real_buttons &= (uint8_t)~(1 << b); }
+            if (b >= 0) { if (e.type == SDL_MOUSEBUTTONDOWN) g_mouse.real_buttons |= (uint8_t)(1 << b), g_mouse_latch |= (uint8_t)(1 << b); else g_mouse.real_buttons &= (uint8_t)~(1 << b); }
             break;
         }
         case SDL_MOUSEWHEEL: g_mouse.wheel += e.wheel.y * 120; break;
-        case SDL_CONTROLLERDEVICEADDED:
-            if (!g_pad) { g_pad = SDL_GameControllerOpen(e.cdevice.which); if (g_pad) fprintf(stderr, "[input] controller: %s\n", SDL_GameControllerName(g_pad)); }
+        case SDL_CONTROLLERDEVICEADDED: case SDL_CONTROLLERDEVICEREMOVED:
+            if (g_pad_on) {
+                if (e.type == SDL_CONTROLLERDEVICEREMOVED && g_pad && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad))) {
+                    SDL_GameControllerClose(g_pad); g_pad = NULL;
+                    memset(g_kb_pad, 0, sizeof g_kb_pad);
+                }
+                pad_open_best();                       /* gptokeyb's virtual pad can appear after the game starts */
+            }
             break;
-        case SDL_CONTROLLERDEVICEREMOVED:
-            if (g_pad && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad))) {
-                SDL_GameControllerClose(g_pad); g_pad = NULL;
-                memset(g_kb_pad, 0, sizeof g_kb_pad); g_mouse.pad_buttons = 0;
+        case SDL_CONTROLLERBUTTONDOWN:
+            if (g_pad && e.cbutton.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad))) { uint32_t bit = pad_bit_of(e.cbutton.button); g_pad_latch |= bit; g_pad_latch_engine |= bit; }
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            if (g_pad && e.caxis.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad)) && e.caxis.value > TRIGGER_ON) {
+                if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) g_pad_latch |= 1u << FAM_PB_LT, g_pad_latch_engine |= 1u << FAM_PB_LT;
+                if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) g_pad_latch |= 1u << FAM_PB_RT, g_pad_latch_engine |= 1u << FAM_PB_RT;
             }
             break;
         }
@@ -249,20 +343,24 @@ void fam_input_init(void) {
     done = 1;
     SDL_InitSubSystem(SDL_INIT_EVENTS);
     script_init();
-    if (!fam_config_int("pad", 0)) return;           /* gptokeyb supplies keys and mouse */
+    g_pad_on = fam_config_int("pad", 1);              /* FAMILIA_PAD=0: no controller */
+    if (!g_pad_on) return;
     SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
     const char *db = getenv("SDL_GAMECONTROLLERCONFIG_FILE");
     if (db) SDL_GameControllerAddMappingsFromFile(db);
-    for (int i = 0; i < SDL_NumJoysticks() && !g_pad; i++)
-        if (SDL_IsGameController(i)) { g_pad = SDL_GameControllerOpen(i); if (g_pad) fprintf(stderr, "[input] controller: %s\n", SDL_GameControllerName(g_pad)); }
+    pad_open_best();
 }
 
-void fam_input_keys(uint8_t out[256]) { for (int i = 0; i < 256; i++) out[i] = g_kb_real[i] | g_kb_pad[i] | g_kb_script[i]; }
+void fam_input_keys(uint8_t out[256]) {
+    for (int i = 0; i < 256; i++) out[i] = g_kb_real[i] | g_kb_pad[i] | g_kb_script[i] | g_kb_latch[i];
+    memset(g_kb_latch, 0, sizeof g_kb_latch);
+}
 void fam_input_mouse(int32_t *dx, int32_t *dy, int32_t *dz, uint8_t *buttons) {
     int32_t x = (int32_t)g_mouse.acc_x, y = (int32_t)g_mouse.acc_y;
     g_mouse.acc_x -= (float)x; g_mouse.acc_y -= (float)y;     /* keep the fraction */
     *dx = x; *dy = y; *dz = g_mouse.wheel; g_mouse.wheel = 0;
-    *buttons = g_mouse.real_buttons | g_mouse.pad_buttons;
+    *buttons = g_mouse.real_buttons | g_mouse.pad_buttons | g_mouse_latch;
+    g_mouse_latch = 0;
 }
 int fam_input_next_key(fam_key_event *ev) {
     if (g_qh == g_qt) return 0;

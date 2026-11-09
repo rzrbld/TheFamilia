@@ -64,7 +64,7 @@ $(OUT)/runtime/native_math.o $(OUT)/runtime/native_frame.o $(OUT)/runtime/native
 # the PortMaster launcher (import + settings page)
 launcher: build/familia-launcher.aarch64
 build/familia-launcher.aarch64: launcher/familia_launcher.c launcher/font.h
-	$(CC) -O2 -Wall -o $@ $< $(shell pkg-config --cflags --libs sdl2)
+	$(CC) -O2 -Wall -o $@ $< $(shell pkg-config --cflags --libs sdl2 SDL2_ttf)
 
 # the first-run importer (unpacks the user's CDs, patch and Game.exe into data/)
 import: build/familia-import.aarch64

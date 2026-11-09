@@ -46,8 +46,6 @@ export FAMILIA_USER_DIR="$CONFDIR"
 export FAMILIA_FPS=${FAMILIA_FPS:-1} FAMILIA_LIMIT=${FAMILIA_LIMIT:-0} FAMILIA_TEXTURES=${FAMILIA_TEXTURES:-32}
 export FAMILIA_STATS=${FAMILIA_STATS:-0}     # 1: performance lines in log.txt every 5 s
 [ -f "$CONFDIR/dev.cfg" ] && source "$CONFDIR/dev.cfg"   # developer switches (e.g. FAMILIA_PROF=1)
-GPTK="$GAMEDIR/familia.gptk"
-[ -f "$CONFDIR/familia.gptk" ] && GPTK="$CONFDIR/familia.gptk"
 
 # CPU: the game runs on one thread and is CPU-bound. "perf" holds the cores
 # at their rated speed (performance governor, capped at 1512 MHz: the H700's
@@ -78,7 +76,15 @@ cpu_perf() {
 trap cpu_restore EXIT
 [ "${FAMILIA_CPU:-perf}" = perf ] && cpu_perf
 
-$GPTOKEYB "familia.${DEVICE_ARCH}" -c "$GPTK" &
+# Controller: gptokeyb2 presents the handheld's controls as a virtual Xbox 360
+# pad, which the game reads as its joystick (in-game Options > Controls can
+# rebind it). Without gptokeyb2 the game reads the pad itself; gptokeyb then
+# only provides the hotkey exit (familia.gptk maps nothing).
+if [ -n "$GPTOKEYB2" ]; then
+  $GPTOKEYB2 "familia.${DEVICE_ARCH}" -x &
+else
+  $GPTOKEYB "familia.${DEVICE_ARCH}" -c "$GAMEDIR/familia.gptk" &
+fi
 pm_platform_helper "$GAMEDIR/familia.${DEVICE_ARCH}"
 if [ -n "$FAMILIA_TIMEOUT" ]; then        # automated tests only
   timeout -k 5 "$FAMILIA_TIMEOUT" ./familia.${DEVICE_ARCH} data

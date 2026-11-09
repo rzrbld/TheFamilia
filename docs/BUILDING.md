@@ -76,7 +76,8 @@ Set these in `ports/the_familia/conf/dev.cfg` (a shell fragment that
 | `FAMILIA_PROBE=1` | Function timing probes (`config/probes.json`) in the 5-second stats lines. |
 | `FAMILIA_PROF=1` | Sampling profiler. Read the dumps with `tools/prof_report.py`. |
 | `FAMILIA_MOVIES=0` | Skip the videos. |
-| `FAMILIA_PAD=1` | Read the controller directly instead of through gptokeyb. |
+| `FAMILIA_PAD=0` | No controller (keyboard and mouse only). |
+| `FAMILIA_PADDBG=1` | Log the player, car, menu and control-table state every 0.25 s. |
 
 Crash reports in `log.txt` name the translated function. `tools/addr.sh`
 resolves host addresses against the unstripped binary.

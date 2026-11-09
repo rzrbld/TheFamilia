@@ -46,22 +46,32 @@ A full playthrough has not been verified yet.
 3. Start **The Familia** from the Ports menu. The first start imports the game
    (about 2 GB, several minutes; keep the handheld charged). You can delete
    `source/` afterwards.
-4. The launcher opens. Set the FPS counter, frame limit, look speed, CPU mode,
-   32- or 16-bit textures and controller bindings, then choose **Save and Run**.
+4. The launcher opens. Set the FPS counter, frame limit, look sensitivity, CPU
+   mode and 32- or 16-bit textures, or view the controller layout, then choose
+   **Save and run**.
 
-Controls go through PortMaster's gptokeyb, so the game sees a keyboard and mouse:
+The game reads the controller as its own gamepad. PortMaster's gptokeyb2 presents
+any handheld's buttons as a standard Xbox 360 pad, so the layout is the same
+everywhere. On foot and in the car have separate layouts, like the console
+versions:
 
-| Button | Action | Button | Action |
-|---|---|---|---|
-| Left stick / d-pad | move, steer | Right stick | look, aim |
-| A | use, enter | L1 / R1 | previous / next weapon |
-| B | jump, handbrake | L2 | aim |
-| X | reload | R2 | fire |
-| Y | crouch | L3 | run / walk |
-| Start | pause menu | R3 | horn |
-| Select | map | | |
+| Button | On foot | In the car |
+|---|---|---|
+| Left stick | move | steer |
+| Right stick | look, aim | look around |
+| RT / LT | fire / sniper mode | accelerate / brake, reverse (analog) |
+| A | confirm in menus | confirm in menus |
+| B | reload | speed limiter |
+| X | jump | handbrake |
+| Y | use, get in a car | get out |
+| LB / RB | inventory / crouch | look left / right |
+| L3 / R3 | run or walk / objectives | horn / camera |
+| D-pad | next and previous weapon, holster, drop | gear up and down, manual gears |
+| Select / Start | city map / pause menu | city map / pause menu |
 
-Every button can be rebound in the launcher.
+Rebind any of it in the game's **Options → Controls** (player and car pages,
+second column). The same menu has aiming sensitivity for X and Y and mouse
+inversion. The launcher's **Look sensitivity** sets the right stick's base speed.
 
 Everything the port writes stays in `ports/the_familia/`: saves and settings in
 `conf/`, the log in `log.txt`. Keep `conf/` when updating, and attach `log.txt`

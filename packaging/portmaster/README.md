@@ -55,31 +55,32 @@ in `log.txt`.
    minutes; keep the handheld powered). You can delete `source/` afterwards.
 
 Every later start opens the launcher: FPS counter, frame limit (off/30/60), look
-speed, CPU (1.5 GHz performance governor, restored on exit, or the system
-setting), textures (32-bit: smoother streaming; 16-bit: about 150 MB less RAM),
-controller bindings, **Save and Run**.
+sensitivity (right stick speed), CPU (1.5 GHz performance governor, restored on
+exit, or the system setting), textures (32-bit: smoother streaming; 16-bit: about
+150 MB less RAM), the controller layout, **Save and run**.
 
 ## Controls
 
-The controller goes through PortMaster's gptokeyb; the game sees a keyboard and mouse.
+The game reads the controller as its own gamepad: gptokeyb2 presents the
+handheld as a standard Xbox 360 pad. On foot and in the car have separate
+layouts:
 
-| Button | Action |
-|---|---|
-| Left stick / D-pad | move, steer |
-| Right stick | look, aim |
-| A | use, enter |
-| B | jump, handbrake |
-| X | reload |
-| Y | crouch |
-| L1 / R1 | previous / next weapon |
-| L2 | aim |
-| R2 | fire |
-| L3 | run / walk |
-| R3 | horn |
-| Start | pause menu |
-| Select | map |
+| Button | On foot | In the car |
+|---|---|---|
+| Left stick | move | steer |
+| Right stick | look, aim | look around |
+| RT / LT | fire / sniper mode | accelerate / brake, reverse (analog) |
+| A | confirm in menus | confirm in menus |
+| B | reload | speed limiter |
+| X | jump | handbrake |
+| Y | use, get in a car | get out |
+| LB / RB | inventory / crouch | look left / right |
+| L3 / R3 | run or walk / objectives | horn / camera |
+| D-pad | weapons: next, previous, holster, drop | gear up, down, manual gears |
+| Select / Start | city map / pause menu | city map / pause menu |
 
-All bindings can be changed in the launcher.
+Rebind in the game's Options > Controls (player and car pages, second column);
+aiming sensitivity X/Y and mouse inversion are there too.
 
 ## Files written
 

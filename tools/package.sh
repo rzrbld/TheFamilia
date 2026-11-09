@@ -18,6 +18,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$ROOT:/src" -e ELF="$ELF" familia-cro
   cp /usr/share/doc/libvorbis0a/copyright dist/stage/the_familia/licenses/LICENSE-libvorbis.txt
   cp /usr/share/doc/libogg0/copyright dist/stage/the_familia/licenses/LICENSE-libogg.txt'
 cp "$ROOT/packaging/familia.gptk" "$ROOT/packaging/shaders.seed" "$P/"
+mkdir -p "$P/fonts" && cp "$ROOT/packaging/fonts/SpecialElite-Regular.ttf" "$P/fonts/"
+cp "$ROOT/packaging/licenses/LICENSE-SpecialElite.txt" "$P/licenses/"
 cp "$ROOT/packaging/licenses/LICENSE-gptokeyb.txt" "$P/licenses/"
 # the movie player's minimal FFmpeg (tools/build_ffmpeg.sh), LGPL 2.1, shared
 for l in libavformat.so.60 libavcodec.so.60 libswscale.so.7 libswresample.so.4 libavutil.so.58; do
