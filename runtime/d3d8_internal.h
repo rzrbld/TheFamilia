@@ -51,6 +51,7 @@ typedef struct {
     uint32_t dirty_lo, dirty_hi; /* byte range written since the last upload */
     uint32_t lock_off, lock_size;
     uint32_t rewrites;           /* uploads after the first; past a few the buffer is streamed instead */
+    uint32_t version;            /* bumped at each Unlock: streamed copies of older data are stale */
 } fam_buffer;
 
 typedef struct {
@@ -87,7 +88,7 @@ typedef struct {
 enum { FAM_DIRTY_XF = 1, FAM_DIRTY_RS = 2, FAM_DIRTY_TSS = 4, FAM_DIRTY_VP = 8, FAM_DIRTY_LIGHT = 16, FAM_DIRTY_MAT = 32 };
 
 extern fam_device g_dev;
-typedef struct { uint64_t draws, prims, uploads, tex_uploads, tex_bytes, progs, buf_bytes; } fam_draw_stats;
+typedef struct { uint64_t draws, prims, uploads, tex_uploads, tex_bytes, progs, buf_bytes, vreuse; } fam_draw_stats;
 /* d3d8_stream.c: buffer-binding cache, streaming ring */
 void fam_bind_array(unsigned b); void fam_bind_element(unsigned b); void fam_bind_forget(unsigned b);
 extern fam_draw_stats g_draw_stats;

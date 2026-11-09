@@ -697,7 +697,30 @@ static void d_DrawIndexedPrimitive(void) {           /* (this, type, minIndex, n
         } else {
             const uint8_t *vsrc = (const uint8_t *)hle_ptr(vb->mem) + (size_t)g_dev.base_vertex * g_dev.stream_stride;
             if (fam_stream_on()) fam_stream_need(numV * (g_dev.stream_stride ? g_dev.stream_stride : 64) + n * (i32 ? 4 : 2) + 2 * g_dev.stream_stride);
-            long bv = numV ? stream_vertices(p, fvf, g_dev.stream_stride, vsrc, minI, numV) : -1;
+            long bv = -1;
+            /* LS3D draws each face group of a mesh with the whole vertex range of its
+             * LOD: a range copied into the ring earlier in this segment, from the same
+             * unchanged buffer, is drawn again from there instead of copied again */
+            static struct { const uint8_t *src; const fam_buffer *vb; uint32_t ver, first, count, stride, epoch; long bv; } vc[8];
+            static unsigned vc_next;
+            extern uint32_t fam_stream_epoch;
+            uint32_t stride = g_dev.stream_stride;
+            if (numV && fam_stream_on() && stride) {
+                for (int k = 0; k < 8; k++)
+                    if (vc[k].src == vsrc && vc[k].vb == vb && vc[k].ver == vb->version && vc[k].stride == stride &&
+                        vc[k].epoch == fam_stream_epoch && minI >= vc[k].first && minI + numV <= vc[k].first + vc[k].count) {
+                        bv = vc[k].bv + (long)(minI - vc[k].first);
+                        fam_bind_array(fam_stream_buffer());
+                        bind_attribs(p, fvf, stride, (const uint8_t *)0);
+                        g_draw_stats.vreuse++;
+                        break;
+                    }
+            }
+            if (bv < 0 && numV) {
+                bv = stream_vertices(p, fvf, stride, vsrc, minI, numV);
+                if (bv >= 0) { unsigned k = vc_next++ & 7; vc[k].src = vsrc; vc[k].vb = vb; vc[k].ver = vb->version; vc[k].first = minI;
+                               vc[k].count = numV; vc[k].stride = stride; vc[k].epoch = fam_stream_epoch; vc[k].bv = bv; }
+            }
             if (!numV) { fam_bind_array(0); bind_attribs(p, fvf, g_dev.stream_stride, vsrc); }
             const void *ix = stream_indices(ib, A32(4), n, i32);
             if (bv >= 0) fam_glDrawRangeElementsBaseVertex(m, minI, minI + numV - 1, (GLsizei)n, it, ix, (GLint)(bv - (long)minI));

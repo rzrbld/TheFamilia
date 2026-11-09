@@ -258,6 +258,7 @@ static uint32_t g_last_import_va;
  * thread that holds the machine, so the index passes through a global. */
 static volatile uint32_t g_pending_shim;
 uint32_t hle_shim_calls[8192];                          /* [familia] */
+extern uint64_t hle_shim_ns[8192];
 int hle_shim_count(void) { return g_shim_n; }
 const char *hle_shim_name_at(int i) { return i >= 0 && i < g_shim_n ? g_shim[i].name : NULL; }
 static void shim_entry(void) {
@@ -270,8 +271,15 @@ static void shim_entry(void) {
     if (trace < 0) trace = getenv("HLE_TRACE") != NULL;
     if (trace) fprintf(stderr, "[imp] %s ret=%08X a=%08X %08X %08X\n", g_shim[i].name,
                        MEM32(g_esp), MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12));
+    static int prof = -1;                               /* [familia] HLE_SHIMPROF=1: time per shim */
+    if (prof < 0) prof = getenv("HLE_SHIMPROF") != NULL;
+    if (!prof) { g_shim[i].fn(); return; }
+    struct timespec a, b; clock_gettime(CLOCK_MONOTONIC, &a);
     g_shim[i].fn();
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    hle_shim_ns[i] += (uint64_t)(b.tv_sec - a.tv_sec) * 1000000000ull + (uint64_t)(b.tv_nsec - a.tv_nsec);
 }
+uint64_t hle_shim_ns[8192];                             /* [familia] HLE_SHIMPROF time per shim */
 recomp_func_t recomp_lookup_import(uint32_t va) {
     if (va < SHIM_BASE || va >= SHIM_BASE + SHIM_STEP * (uint32_t)g_shim_n) return NULL;
     uint32_t i = (va - SHIM_BASE) / SHIM_STEP;

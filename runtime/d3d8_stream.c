@@ -90,8 +90,10 @@ int fam_stream_on(void) { return R.on; }
 /* at Present: fence this frame's segment, move to the next one once the GPU is done with it */
 extern int fam_glt_on;
 void fam_glt_frame_end(uint64_t f); void fam_glt_wait_segment(int s, uint64_t f);
+uint32_t fam_stream_epoch;            /* bumped whenever the ring moves to another segment */
 void fam_stream_frame(void) {
     if (!R.on) return;
+    fam_stream_epoch++;
     if (fam_glt_on) {                 /* fences live on the GL thread (gl_thread.c) */
         static uint64_t frame;
         fam_glt_frame_end(frame);

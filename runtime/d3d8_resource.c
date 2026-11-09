@@ -277,6 +277,7 @@ static void b_Lock(void) {                           /* (this, offset, size, BYT
 }
 static void b_Unlock(void) {
     fam_buffer *b = fam_buffer_of(A32(0));
+    b->version++;
     uint32_t lo = b->lock_off, hi = b->lock_off + b->lock_size;
     if (b->dirty_hi <= b->dirty_lo) { b->dirty_lo = lo; b->dirty_hi = hi; }
     else { if (lo < b->dirty_lo) b->dirty_lo = lo; if (hi > b->dirty_hi) b->dirty_hi = hi; }

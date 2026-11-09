@@ -163,15 +163,38 @@ void fam_present_hook(void) {
         fprintf(stderr, "[stats] rss %ld MB peak %ld MB | lock takes/s %.0f yields/s %.0f | ", rss_kb >> 10, hwm_kb >> 10,
                 (double)(hle_mach_takes - last_takes) / s, (double)(hle_yields - last_yields) / s);
         last_takes = hle_mach_takes; last_yields = hle_yields;
+        {   /* CPU clock and temperature: the H700 throttles above 60 C */
+            long khz = 0, mc = 0; FILE *q;
+            if ((q = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "r"))) { if (fscanf(q, "%ld", &khz) != 1) khz = 0; fclose(q); }
+            if ((q = fopen("/sys/class/thermal/thermal_zone0/temp", "r"))) { if (fscanf(q, "%ld", &mc) != 1) mc = 0; fclose(q); }
+            if (khz || mc) fprintf(stderr, "cpu %ld MHz %.1f C | ", khz / 1000, mc / 1000.0);
+        }
+        if (getenv("HLE_SHIMPROF")) {          /* the shims that took the most time this window, per frame */
+            extern uint64_t hle_shim_ns[8192]; extern uint32_t hle_shim_calls[8192];
+            int hle_shim_count(void); const char *hle_shim_name_at(int);
+            static uint64_t last_ns[8192]; static uint32_t last_c[8192];
+            int n = hle_shim_count(); if (n > 8192) n = 8192;
+            int top[12] = {0}; double tv[12] = {0}; double tot = 0;
+            for (int i = 0; i < n; i++) {
+                double v = (double)(hle_shim_ns[i] - last_ns[i]); tot += v;
+                for (int k = 0; k < 12; k++) if (v > tv[k]) { for (int m = 11; m > k; m--) tv[m] = tv[m - 1], top[m] = top[m - 1]; tv[k] = v; top[k] = i; break; }
+            }
+            double fr = (double)g_window_frames;
+            fprintf(stderr, "[shims] per frame %.2f ms:", tot / 1e6 / fr);
+            for (int k = 0; k < 12 && tv[k] > 0; k++)
+                fprintf(stderr, " %s %.2f ms/%.0f", hle_shim_name_at(top[k]), tv[k] / 1e6 / fr, (hle_shim_calls[top[k]] - last_c[top[k]]) / fr);
+            fprintf(stderr, "\n");
+            for (int i = 0; i < n; i++) last_ns[i] = hle_shim_ns[i], last_c[i] = hle_shim_calls[i];
+        }
         fprintf(stderr, "%.1f fps | frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f | draws/frame %.0f\n",
                 (double)g_window_frames / s, sorted[g_nft / 2], sorted[g_nft * 95 / 100], sorted[g_nft * 99 / 100], sorted[g_nft - 1],
                 (double)(g_draw_stats.draws - g_window_draws) / (double)g_window_frames);
         { void fam_probe_report(double); fam_probe_report((double)g_window_frames); }
         { void fam_stream_report(double); fam_stream_report((double)g_window_frames); }
         { static fam_draw_stats last; double fr = (double)g_window_frames;
-          fprintf(stderr, "[gpu] per frame: tex uploads %.1f (%.0f KB) | buffer updates %.0f KB | programs built %llu (total %llu)\n",
+          fprintf(stderr, "[gpu] per frame: tex uploads %.1f (%.0f KB) | buffer updates %.0f KB | vertex ranges reused %.0f | programs built %llu (total %llu)\n",
                   (double)(g_draw_stats.tex_uploads - last.tex_uploads) / fr, (double)(g_draw_stats.tex_bytes - last.tex_bytes) / 1024.0 / fr,
-                  (double)(g_draw_stats.buf_bytes - last.buf_bytes) / 1024.0 / fr,
+                  (double)(g_draw_stats.buf_bytes - last.buf_bytes) / 1024.0 / fr, (double)(g_draw_stats.vreuse - last.vreuse) / fr,
                   (unsigned long long)(g_draw_stats.progs - last.progs), (unsigned long long)g_draw_stats.progs);
           last = g_draw_stats; }
         g_window_start = now; g_window_frames = 0; g_nft = 0; g_window_draws = g_draw_stats.draws;
