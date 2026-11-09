@@ -407,7 +407,7 @@ static int run_import(void) {
     fcntl(pfd[0], F_SETFL, O_NONBLOCK);
     memset(g_log, 0, sizeof g_log);
     Uint32 t0 = SDL_GetTicks();
-    char buf[512]; size_t bl = 0; int status = -1;
+    char buf[512]; size_t bl = 0; int status = -1, exited = 0;
     for (;;) {
         ssize_t r = read(pfd[0], buf + bl, sizeof buf - 1 - bl);
         if (r > 0) {
@@ -416,8 +416,10 @@ static int run_import(void) {
             while ((nl = strchr(buf, '\n'))) { *nl = 0; printf("%s\n", buf); log_push(buf); memmove(buf, nl + 1, strlen(nl + 1) + 1); bl = strlen(buf); }
             if (bl == sizeof buf - 1) { log_push(buf); bl = 0; }
         }
-        int st; pid_t w = waitpid(pid, &st, WNOHANG);
-        if (w == pid) { status = WIFEXITED(st) ? WEXITSTATUS(st) : -1; if (r <= 0) break; }
+        /* the importer can exit in the same pass that reads its last line: remember the exit, and
+         * stop once its output is drained (waitpid reports the exit only once) */
+        if (!exited) { int st; if (waitpid(pid, &st, WNOHANG) == pid) { status = WIFEXITED(st) ? WEXITSTATUS(st) : -1; exited = 1; } }
+        if (exited && r <= 0) { if (bl) log_push(buf); break; }
         Uint32 s = (SDL_GetTicks() - t0) / 1000;
         frame_begin("IMPORTING YOUR GAME FILES");
         char el[40]; snprintf(el, sizeof el, "Elapsed %02u:%02u", s / 60, s % 60);
