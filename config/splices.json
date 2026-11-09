@@ -1,7 +1,55 @@
 [
- {"module": "ls3df", "id": 0, "entry": "10076C8C", "exit": "100770B9", "what": "ITexture::Create 8-bit palette -> ARGB"},
- {"module": "ls3df", "id": 1, "entry": "10076E42", "exit": "100770B9", "what": "ITexture::Create 16-bit -> ARGB"},
- {"module": "ls3df", "id": 2, "entry": "10076F60", "exit": "100770B9", "what": "ITexture::Create 24-bit -> ARGB"},
- {"module": "ls3df", "id": 3, "entry": "10077026", "exit": "100770B9", "what": "ITexture::Create 32-bit -> ARGB"},
- {"module": "ls3df", "id": 4, "entry": "10077520", "exit": "1007782D", "what": "ITexture::Create next mip level"}
+ {
+  "module": "ls3df",
+  "id": 0,
+  "entry": "10076C8C",
+  "exit": "100770B9",
+  "what": "ITexture::Create 8-bit palette -> ARGB"
+ },
+ {
+  "module": "ls3df",
+  "id": 1,
+  "entry": "10076E42",
+  "exit": "100770B9",
+  "what": "ITexture::Create 16-bit -> ARGB"
+ },
+ {
+  "module": "ls3df",
+  "id": 2,
+  "entry": "10076F60",
+  "exit": "100770B9",
+  "what": "ITexture::Create 24-bit -> ARGB"
+ },
+ {
+  "module": "ls3df",
+  "id": 3,
+  "entry": "10077026",
+  "exit": "100770B9",
+  "what": "ITexture::Create 32-bit -> ARGB"
+ },
+ {
+  "module": "ls3df",
+  "id": 4,
+  "entry": "10077520",
+  "exit": "1007782D",
+  "what": "ITexture::Create next mip level"
+ },
+ {
+  "module": "ls3df",
+  "id": 100,
+  "entry": "10062C14",
+  "exit": "10062C7B",
+  "fn": "fam_render_splice",
+  "exit_fn": "fam_render_splice_exit",
+  "what": "I3D_driver::Render: per-frame pass over the scene's sounds"
+ },
+ {
+  "module": "ls3df",
+  "id": 101,
+  "entry": "100164C0",
+  "exit": "10016507",
+  "fn": "fam_render_splice",
+  "exit_fn": "fam_render_splice_exit",
+  "what": "I3D_driver::RenderShadowTexture: 2x2 box filter into the 16-bit shadow texture"
+ }
 ]

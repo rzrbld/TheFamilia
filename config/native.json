@@ -29,7 +29,11 @@
   "100112A0": "fam_native_vec_mul_f",
   "100112D0": "fam_native_vec_add",
   "10054810": "fam_native_singlemesh_bvol",
-  "1001D320": "fam_native_ipol_update"
+  "1001D320": "fam_native_ipol_update",
+  "10058540": "fam_native_update_sound",
+  "10039280": "fam_native_render_fgroup",
+  "1001B500": "fam_native_add_to_fftree",
+  "1001B430": "fam_native_remove_from_fftree"
  },
  "game": {
   "0061D0B0": "fam_native_strcmpi_game",

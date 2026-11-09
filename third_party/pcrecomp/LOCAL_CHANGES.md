@@ -30,3 +30,6 @@ Every local edit is marked `[familia]` in the source.
 - `win32hle/kernel32_ext.c` `FindFirstFileA`: names without wildcards that were not found are remembered until `hle_path_gen` changes (LS3D probes every maps directory for each texture); `.ini` writes and `_lcreat` bump `hle_path_gen`; time and call counters for the stutter report.
 - `win32hle/hle_path.c`: directory listings cached (32 directories, until `hle_path_gen` changes) for case-insensitive lookups of names not found as given.
 - `win32hle/kernel32_ext.c` `ReadFile`: calls the weak `hle_read_hook(fd, offset, bytes)` after each read (the port's archive read-ahead); `HLE_READTRACE=1` logs reads over 2 ms.
+- `win32hle/host_lite.c` `shim_entry`: optional recording of shim calls (index and 7 stack words) for the port's native checks; `HLE_SHIMPROF=1` times each shim.
+- `win32hle/host_lite.c` `hle_shim_fn`: a shim's function for a shim VA, for direct calls from the port's native code.
+- `win32hle/guest_mem.c`: the reservation table is searched by binary search (overlap, insert, release, span) and free space is found next-fit from a moving cursor (wrapping once) instead of first-fit from the bottom: the linear scans grew with the number of live large blocks over a session. Reserve/release counts and time for the port's growth report.

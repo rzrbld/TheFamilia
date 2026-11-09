@@ -253,6 +253,7 @@ static void warm_subtree(uint32_t root) {
     }
 }
 static uint64_t g_uc_nodes;
+uint64_t fam_uc_nodes(void) { return g_uc_nodes; }
 static void update_children(uint32_t frm) {
     g_uc_nodes++;
     prefetch_frame(MEM32(frm + FRM_CHILD));
@@ -661,3 +662,101 @@ int fam_native_frame_check(void) {
     hle_heap_free(hle_ptr(mem));
     return bad + check_update() + check_bounds();
 }
+
+/* ------------------------------------------------- the fast-find name tree */
+/* I3D_frame::AddToFFTree (LS3DF 0x1001B500, thiscall, no arguments): the
+ * frame into the binary tree by name that FindFrameFast searches, a frame
+ * with a name already there appended at the end of that name's run (each
+ * equal node's right link). Same algorithm and order of comparisons; the
+ * next node of a run is prefetched with its name while one is compared. */
+#define FF_ROOT    0x100BFC68u
+#define FF_COUNTER 0x100C0044u
+#define FF_LEFT    0x134
+#define FF_RIGHT   0x138
+static int ff_cmp(const char *a, const char *b) {        /* strcmp's sign, bytes unsigned */
+    for (;; a++, b++) {
+        unsigned char x = (unsigned char)*a, y = (unsigned char)*b;
+        if (x != y) return x < y ? -1 : 1;
+        if (!x) return 0;
+    }
+}
+static void add_to_fftree(uint32_t self) {
+    MEM32(FF_COUNTER) += 1;
+    uint32_t frm = MEM32(FF_ROOT);
+    if (!frm) { MEM32(FF_ROOT) = self; goto done; }
+    const char *name = (const char *)ADDR(MEM32(self + FRM_NAME));
+    for (;;) {
+        int c = ff_cmp(name, (const char *)ADDR(MEM32(frm + FRM_NAME)));
+        if (c < 0) {
+            uint32_t l = MEM32(frm + FF_LEFT);
+            if (!l) { MEM32(frm + FF_LEFT) = self; goto done; }
+            frm = l;
+        } else if (c == 0) {
+            uint32_t r;
+            while ((r = MEM32(frm + FF_RIGHT)) != 0) {
+                uint32_t rr = MEM32(r + FF_RIGHT);           /* the one after: its node and name */
+                if (rr) __builtin_prefetch((const void *)ADDR(rr + FRM_NAME));   /* its name pointer and links */
+                if (ff_cmp(name, (const char *)ADDR(MEM32(r + FRM_NAME)))) break;
+                frm = r;
+            }
+            MEM32(self + FF_RIGHT) = MEM32(frm + FF_RIGHT);
+            MEM32(frm + FF_RIGHT) = self;
+            goto done;
+        } else {
+            uint32_t r = MEM32(frm + FF_RIGHT);
+            if (!r) { MEM32(frm + FF_RIGHT) = self; goto done; }
+            frm = r;
+        }
+    }
+done:
+    MEM32(self + FRM_FLAGS) |= 0x20000000u;                 /* FRMFLAGS_FFTREE */
+}
+void fam_native_add_to_fftree(void) {
+    add_to_fftree(g_ecx);
+    g_esp += 4;                                             /* ret */
+}
+
+/* the check: random trees of names drawn from a few values (long equal runs),
+ * inserted by the translated original and natively into copies, compared */
+void recomp_ls3df_1001B500_orig(void);
+int fam_native_fftree_check(void) {
+    enum { NF = 96 };
+    uint32_t mem = hle_va(hle_heap_alloc(NF * 0x140 * 2 + NF * 16, 1));
+    uint32_t a = mem, b = mem + NF * 0x140, names = mem + NF * 0x140 * 2;
+    static const char *const pool[] = { "", "a", "ab", "b", "car", "Car", "car1", "zz" };
+    int bad = 0;
+    uint32_t root0 = MEM32(FF_ROOT), cnt0 = MEM32(FF_COUNTER);
+    for (int n = 0; n < 3000 && !bad; n++) {
+        int nf = 2 + (int)rnd(NF - 2);
+        for (int i = 0; i < nf; i++) strcpy((char *)ADDR(names + i * 16), pool[rnd(8)]);
+        for (int pass = 0; pass < 2; pass++) {
+            uint32_t base = pass ? b : a;
+            memset((void *)ADDR(base), 0, NF * 0x140);
+            for (int i = 0; i < nf; i++) MEM32(base + i * 0x140 + FRM_NAME) = names + (uint32_t)i * 16;
+            MEM32(FF_ROOT) = 0;
+            for (int i = 0; i < nf; i++) {
+                g_ecx = base + (uint32_t)i * 0x140;
+                if (!pass) { PUSH32(g_esp, RECOMP_RETADDR); recomp_ls3df_1001B500_orig(); }
+                else { PUSH32(g_esp, RECOMP_RETADDR); fam_native_add_to_fftree(); }
+            }
+            if (!pass) MEM32(a + NF * 0x140 - 4) = MEM32(FF_ROOT) ? (MEM32(FF_ROOT) - a) / 0x140 + 1 : 0;
+            else bad = MEM32(FF_ROOT) != (MEM32(a + NF * 0x140 - 4) ? b + (MEM32(a + NF * 0x140 - 4) - 1) * 0x140 : 0);
+        }
+        for (int i = 0; i < nf && !bad; i++) {
+            uint32_t fa = a + (uint32_t)i * 0x140, fb = b + (uint32_t)i * 0x140;
+            uint32_t la = MEM32(fa + FF_LEFT), ra = MEM32(fa + FF_RIGHT), lb = MEM32(fb + FF_LEFT), rb = MEM32(fb + FF_RIGHT);
+            if ((la ? la - a : 0) != (lb ? lb - b : 0) || (ra ? ra - a : 0) != (rb ? rb - b : 0) || MEM32(fa + FRM_FLAGS) != MEM32(fb + FRM_FLAGS)) bad = 1;
+        }
+        if (bad) fprintf(stderr, "[native] AddToFFTree MISMATCH (case %d, %d frames)\n", n, nf);
+    }
+    MEM32(FF_ROOT) = root0; MEM32(FF_COUNTER) = cnt0;
+    fprintf(stderr, "[native] I3D_frame::AddToFFTree: %s against the translated original (3000 random trees)\n", bad ? "DIFFERS" : "matches");
+    hle_heap_free(hle_ptr(mem));
+    return bad;
+}
+
+/* I3D_frame::RemoveFromFFTree (LS3DF 0x1001B430): counted for the growth report
+ * (the tree's size is the engine's insert counter minus this), then the original */
+void recomp_ls3df_1001B430_orig(void);
+uint32_t fam_fftree_removes;
+void fam_native_remove_from_fftree(void) { fam_fftree_removes++; recomp_ls3df_1001B430_orig(); }

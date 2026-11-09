@@ -177,6 +177,7 @@ void fam_native_init(void) {
         bad += fam_native_light_check();
         int fam_native_frame_check(void);
         bad += fam_native_frame_check();
+        { int fam_native_fftree_check(void); bad += fam_native_fftree_check(); }
         int fam_native_cull_check(void); bad += fam_native_cull_check();
         mach_leave();
         if (bad) { fam_native_on = 0; fprintf(stderr, "[native] mismatches: native math disabled\n"); }

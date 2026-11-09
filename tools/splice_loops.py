@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """splice_loops.py [GEN_DIR] - splice native loops into translated functions
-(config/splices.json; runtime/native_tex.c).
+(config/splices.json: entry/exit labels, the native "fn"/"exit_fn", default
+runtime/native_tex.c's fam_tex_splice).
 
 At each `L_<entry>:` label it inserts a call to fam_tex_splice(id): when that
 returns 1 the native code has done the loop (registers and memory as the x86
@@ -32,14 +33,15 @@ def main():
                 for s in splices:
                     e, x = s["entry"], s["exit"]
                     if f"\nL_{e}:\n" not in p or f"\nL_{x}:\n" not in p: continue
-                    call = f"fam_tex_splice({s['id']})"
+                    fn, xfn = s.get("fn", "fam_tex_splice"), s.get("exit_fn", "fam_tex_splice_exit")
+                    call = f"{fn}({s['id']})"
                     if call in p: continue
                     p = p.replace(f"\nL_{e}:\n",
-                        f"\nL_{e}:\n    {{ extern int fam_tex_splice(int); RECOMP_REGS_OUT(); "
+                        f"\nL_{e}:\n    {{ extern int {fn}(int); RECOMP_REGS_OUT(); "
                         f"if ({call}) {{ RECOMP_REGS_IN(); goto L_{x}; }} RECOMP_REGS_IN(); }} {MARK}\n", 1)
-                    if "fam_tex_splice_exit()" not in p.split(f"\nL_{x}:\n", 1)[1][:200]:
+                    if f"{xfn}()" not in p.split(f"\nL_{x}:\n", 1)[1][:400]:
                         p = p.replace(f"\nL_{x}:\n",
-                            f"\nL_{x}:\n    {{ extern void fam_tex_splice_exit(void); RECOMP_REGS_OUT(); fam_tex_splice_exit(); }} /* splice exit */\n", 1)
+                            f"\nL_{x}:\n    {{ extern void {xfn}(void); RECOMP_REGS_OUT(); {xfn}(); }} /* splice exit */\n", 1)
                     changed += 1
                 out.append(p)
             if changed:

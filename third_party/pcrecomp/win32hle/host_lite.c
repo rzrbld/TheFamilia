@@ -259,6 +259,9 @@ static uint32_t g_last_import_va;
 static volatile uint32_t g_pending_shim;
 uint32_t hle_shim_calls[8192];                          /* [familia] */
 extern uint64_t hle_shim_ns[8192];
+#define HLE_SHIMREC_MAX 4096
+extern int hle_shimrec, hle_shimrec_n;
+extern uint32_t hle_shimrec_buf[HLE_SHIMREC_MAX][8];
 int hle_shim_count(void) { return g_shim_n; }
 const char *hle_shim_name_at(int i) { return i >= 0 && i < g_shim_n ? g_shim[i].name : NULL; }
 static void shim_entry(void) {
@@ -271,6 +274,10 @@ static void shim_entry(void) {
     if (trace < 0) trace = getenv("HLE_TRACE") != NULL;
     if (trace) fprintf(stderr, "[imp] %s ret=%08X a=%08X %08X %08X\n", g_shim[i].name,
                        MEM32(g_esp), MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12));
+    if (hle_shimrec && hle_shimrec_n < HLE_SHIMREC_MAX) {   /* [familia] the port's native checks record calls */
+        uint32_t *r = hle_shimrec_buf[hle_shimrec_n++];
+        r[0] = i; for (int k = 1; k < 8; k++) r[k] = MEM32(g_esp + 4u * (uint32_t)k);
+    }
     static int prof = -1;                               /* [familia] HLE_SHIMPROF=1: time per shim */
     if (prof < 0) prof = getenv("HLE_SHIMPROF") != NULL;
     if (!prof) { g_shim[i].fn(); return; }
@@ -280,6 +287,16 @@ static void shim_entry(void) {
     hle_shim_ns[i] += (uint64_t)(b.tv_sec - a.tv_sec) * 1000000000ull + (uint64_t)(b.tv_nsec - a.tv_nsec);
 }
 uint64_t hle_shim_ns[8192];                             /* [familia] HLE_SHIMPROF time per shim */
+int hle_shimrec, hle_shimrec_n;                          /* [familia] shim call recording (index, 7 stack words) */
+uint32_t hle_shimrec_buf[HLE_SHIMREC_MAX][8];
+static void hle_unimplemented(void);
+/* [familia] the shim behind a shim VA, called directly by the port's native code (no
+ * shim_entry bookkeeping: per-import counts, trace, the unimplemented stub's name) */
+recomp_func_t hle_shim_fn(uint32_t va) {
+    if (va < SHIM_BASE || va >= SHIM_BASE + SHIM_STEP * (uint32_t)g_shim_n) return NULL;
+    uint32_t i = (va - SHIM_BASE) / SHIM_STEP;
+    return g_shim[i].va == va && g_shim[i].fn != hle_unimplemented ? g_shim[i].fn : NULL;
+}
 recomp_func_t recomp_lookup_import(uint32_t va) {
     if (va < SHIM_BASE || va >= SHIM_BASE + SHIM_STEP * (uint32_t)g_shim_n) return NULL;
     uint32_t i = (va - SHIM_BASE) / SHIM_STEP;

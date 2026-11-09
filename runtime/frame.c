@@ -126,6 +126,17 @@ void fam_present_hook(void) {
         next += step;
     }
     fam_input_pump();
+    {   /* development: FAMILIA_SECTORDBG=1 - how often the camera's sound sector changes */
+        static int dbg = -1; if (dbg < 0) dbg = fam_config_int("sectordbg", 0);
+        if (dbg) {
+            static uint32_t last, changes, frames; uint32_t s = MEM32(0x101C4D00u);
+            if (s != last) changes++, last = s;
+            if (++frames % 150 == 0) {
+                fprintf(stderr, "[sectordbg] %u changes in 150 frames, sector %08X sounds %u\n", changes, s, s ? MEM32(s + 0x160) : 0);
+                changes = 0;
+            }
+        }
+    }
     static int stats = -1;
     if (stats < 0) stats = fam_config_int("stats", 0);
     uint64_t now = SDL_GetPerformanceCounter(), f = SDL_GetPerformanceFrequency();
@@ -185,6 +196,26 @@ void fam_present_hook(void) {
                 fprintf(stderr, " %s %.2f ms/%.0f", hle_shim_name_at(top[k]), tv[k] / 1e6 / fr, (hle_shim_calls[top[k]] - last_c[top[k]]) / fr);
             fprintf(stderr, "\n");
             for (int i = 0; i < n; i++) last_ns[i] = hle_shim_ns[i], last_c[i] = hle_shim_calls[i];
+        }
+        {   /* development: FAMILIA_PEEK=addr,addr,... prints those guest words */
+            const char *pk = getenv("FAMILIA_PEEK");
+            if (pk) {
+                char b[256]; snprintf(b, sizeof b, "%s", pk);
+                fprintf(stderr, "[peek]");
+                for (char *t = strtok(b, ","); t; t = strtok(NULL, ",")) { uint32_t a = (uint32_t)strtoul(t, NULL, 16); fprintf(stderr, " %08X=%08X", a, MEM32(a)); }
+                fprintf(stderr, " | ");
+            }
+        }
+        {   /* what grows over a session: lists the game or the port walks or searches */
+            extern uint64_t hle_vm_reserves, hle_vm_releases, hle_vm_ns; int hle_vm_ranges(void);
+            extern int fam_tex_alive, fam_buf_alive; uint64_t fam_uc_nodes(void); extern uint32_t fam_sounds_last, fam_fftree_removes;
+            static uint64_t lr, lf, lns, lnodes;
+            double fr = (double)g_window_frames;
+            fprintf(stderr, "[growth] heap ranges %d, large allocs %.1f frees %.1f %.2f ms/frame | textures %d buffers %d | "
+                    "frame nodes updated %.0f/frame | sounds %u | name tree %d (inserts %u)\n",
+                    hle_vm_ranges(), (hle_vm_reserves - lr) / fr, (hle_vm_releases - lf) / fr, (hle_vm_ns - lns) / 1e6 / fr,
+                    fam_tex_alive, fam_buf_alive, (fam_uc_nodes() - lnodes) / fr, fam_sounds_last, (int)(MEM32(0x100C0044u) - fam_fftree_removes), MEM32(0x100C0044u));
+            lr = hle_vm_reserves; lf = hle_vm_releases; lns = hle_vm_ns; lnodes = fam_uc_nodes();
         }
         fprintf(stderr, "%.1f fps | frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f | draws/frame %.0f\n",
                 (double)g_window_frames / s, sorted[g_nft / 2], sorted[g_nft * 95 / 100], sorted[g_nft * 99 / 100], sorted[g_nft - 1],

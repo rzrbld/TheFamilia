@@ -100,6 +100,7 @@ static void s_GetContainer(void) {                   /* (this, riid, void**) */
 }
 static void s_GetDevice(void) { fam_com_addref(g_dev.obj); MEM32(A32(1)) = g_dev.obj; RET(D3D_OK, 2); }
 
+int fam_tex_alive, fam_buf_alive;     /* growth report */
 /* ------------------------------------------------------------- textures */
 static uint32_t level_dim(uint32_t d, uint32_t l) { d >>= l; return d ? d : 1; }
 
@@ -112,6 +113,7 @@ static void t_CreateTexture(void) {   /* dev (this, w, h, levels, usage, fmt, po
     uint32_t full = 1; for (uint32_t m = w > h ? w : h; m > 1; m >>= 1) full++;
     if (!lv || lv > full) lv = full;
     fam_texture *t = calloc(1, sizeof *t);
+    fam_tex_alive++;
     t->kind = FAM_RES_TEXTURE;
     t->width = w; t->height = h; t->levels = lv; t->format = fmt; t->usage = usage; t->pool = pool;
     t->has_alpha = fmt_of(fmt) ? fmt_of(fmt)->alpha : 0;
@@ -170,6 +172,7 @@ static void t_Release(void) {
         free(t->lv);
         hle_com_free(t->obj);
         free(t);
+        fam_tex_alive--;
     }
     RET(n, 1);
 }
@@ -258,6 +261,7 @@ void fam_texture_bind(fam_texture *t, int unit) {
 /* -------------------------------------------------------------- buffers */
 static void b_new(int kind, fam_iface *it) {   /* dev (this, length, usage, fvf/format, pool, out**) */
     fam_buffer *b = calloc(1, sizeof *b);
+    fam_buf_alive++;
     b->kind = kind; b->size = A32(1); b->usage = A32(2); b->fvf_or_format = A32(3); b->pool = A32(4);
     b->mem = guest_alloc(b->size);
     b->dirty_lo = 0; b->dirty_hi = b->size;
@@ -303,6 +307,7 @@ static void b_Release(void) {
         if (g_dev.ib == b->obj) g_dev.ib = 0;
         if (b->gl) { glDeleteBuffers(1, &b->gl); fam_bind_forget(b->gl); }
         guest_free(b->mem); hle_com_free(b->obj); free(b);
+        fam_buf_alive--;
     }
     RET(n, 1);
 }

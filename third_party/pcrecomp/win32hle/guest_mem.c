@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -126,32 +127,58 @@ static int remap(uint32_t va, uint64_t size, int prot) {
     return p == (void *)host(va) ? 0 : -1;
 }
 
+/* [familia] The table is searched by binary search and free space found next-fit from
+ * a moving cursor: with thousands of live large blocks (texture levels, buffers) the
+ * linear scans made every large allocation and free slower the longer a game ran. */
+static int rng_ge(uint64_t lo) {                         /* the first range with .lo >= lo */
+    int a = 0, b = g_nrng;
+    while (a < b) { int m = (a + b) / 2; if (g_rng[m].lo < lo) a = m + 1; else b = m; }
+    return a;
+}
 static int overlaps(uint64_t lo, uint64_t hi) {
-    for (int i = 0; i < g_nrng; i++)
-        if (lo < g_rng[i].hi && hi > g_rng[i].lo) return 1;
-    return 0;
+    int i = rng_ge(lo);
+    if (i > 0 && g_rng[i - 1].hi > lo) return 1;
+    return i < g_nrng && g_rng[i].lo < hi;
 }
 static void add_range(uint64_t lo, uint64_t hi) {
-    int i = g_nrng;
-    while (i > 0 && g_rng[i - 1].lo > lo) { g_rng[i] = g_rng[i - 1]; i--; }
+    int i = rng_ge(lo);
+    memmove(&g_rng[i + 1], &g_rng[i], sizeof g_rng[0] * (size_t)(g_nrng - i));
     g_rng[i].lo = lo, g_rng[i].hi = hi;
     g_nrng++;
 }
 
-/* First fit above ANY_LO, past the shim range. */
-static uint32_t find_gap(uint32_t size) {
-    uint64_t at = ANY_LO;
-    for (int i = 0; i <= g_nrng; i++) {
+/* The first gap of size at or above `from` and below `to`, past the shim range. */
+static uint64_t gap_from(uint64_t from, uint64_t to, uint32_t size) {
+    uint64_t at = from;
+    int i = rng_ge(from);
+    if (i > 0 && g_rng[i - 1].hi > at) at = g_rng[i - 1].hi;
+    for (; ; i++) {
         uint64_t next = i < g_nrng ? g_rng[i].lo : ANY_HI;
         if (at < SHIM_HI && at + size > SHIM_LO) at = SHIM_HI;
-        if (next > at && next - at >= size && at + size <= ANY_HI && !(at < SHIM_HI && at + size > SHIM_LO))
-            return (uint32_t)at;
-        if (i < g_nrng && g_rng[i].hi > at) at = g_rng[i].hi;
+        if (at + size > to) return 0;
+        if (next > at && next - at >= size && !(at < SHIM_HI && at + size > SHIM_LO)) return at;
+        if (i >= g_nrng) return 0;
+        if (g_rng[i].hi > at) at = g_rng[i].hi;
     }
-    return 0;
+}
+/* Next fit: from the cursor up, then once from the bottom. */
+static uint64_t g_rover = ANY_LO;
+static uint32_t find_gap(uint32_t size) {
+    uint64_t at = gap_from(g_rover, ANY_HI, size);
+    if (!at) at = gap_from(ANY_LO, ANY_HI, size);
+    if (!at) return 0;
+    g_rover = at + size;
+    return (uint32_t)at;
 }
 
+uint64_t hle_vm_reserves, hle_vm_releases, hle_vm_ns;   /* [familia] growth report: large blocks */
+int hle_vm_ranges(void) { return g_nrng; }
+static uint64_t vm_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec; }
+static uint32_t vm_reserve_locked_(uint32_t va, uint32_t size);
 static uint32_t vm_reserve_locked(uint32_t va, uint32_t size) {
+    uint64_t t = vm_now(); uint32_t r = vm_reserve_locked_(va, size); hle_vm_ns += vm_now() - t; hle_vm_reserves++; return r;
+}
+static uint32_t vm_reserve_locked_(uint32_t va, uint32_t size) {
     if (!size) return 0;
     uint64_t lo = va & ~(uint64_t)(GRAN - 1);
     uint64_t hi = ((uint64_t)(va ? va : 0) + size + GRAN - 1) & ~(uint64_t)(GRAN - 1);
@@ -179,14 +206,14 @@ uint32_t hle_vm_reserve(uint32_t va, uint32_t size) {
 
 /* Release the reservation that starts at va (size is the caller's note of
  * it; the table knows). Its pages go back to inaccessible and zero. */
-static void vm_release_locked(uint32_t va) {
-    for (int i = 0; i < g_nrng; i++) {
-        if (g_rng[i].lo != va) continue;
-        remap((uint32_t)g_rng[i].lo, g_rng[i].hi - g_rng[i].lo, PROT_NONE);
-        memmove(&g_rng[i], &g_rng[i + 1], sizeof g_rng[0] * (size_t)(g_nrng - i - 1));
-        g_nrng--;
-        return;
-    }
+static void vm_release_locked_(uint32_t va);
+static void vm_release_locked(uint32_t va) { uint64_t t = vm_now(); vm_release_locked_(va); hle_vm_ns += vm_now() - t; hle_vm_releases++; }
+static void vm_release_locked_(uint32_t va) {
+    int i = rng_ge(va);
+    if (i >= g_nrng || g_rng[i].lo != va) return;
+    remap((uint32_t)g_rng[i].lo, g_rng[i].hi - g_rng[i].lo, PROT_NONE);
+    memmove(&g_rng[i], &g_rng[i + 1], sizeof g_rng[0] * (size_t)(g_nrng - i - 1));
+    g_nrng--;
 }
 void hle_vm_release(uint32_t va, uint32_t size) {
     (void)size;
@@ -254,8 +281,8 @@ static struct { uint32_t va, span; } g_lcache[LCACHE_N];
 static int g_nlcache;
 static uint64_t g_lcache_bytes;
 static uint32_t range_span(uint32_t va) {
-    for (int i = 0; i < g_nrng; i++) if (g_rng[i].lo == va) return (uint32_t)(g_rng[i].hi - g_rng[i].lo);
-    return 0;
+    int i = rng_ge(va);
+    return i < g_nrng && g_rng[i].lo == va ? (uint32_t)(g_rng[i].hi - g_rng[i].lo) : 0;
 }
 static uint32_t lcache_take(uint32_t total) {            /* g_mem_lock held */
     int best = -1;
