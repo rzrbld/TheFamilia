@@ -28,7 +28,8 @@
   "1000DDB0": "fam_native_vec_dot",
   "100112A0": "fam_native_vec_mul_f",
   "100112D0": "fam_native_vec_add",
-  "10054810": "fam_native_singlemesh_bvol"
+  "10054810": "fam_native_singlemesh_bvol",
+  "1001D320": "fam_native_ipol_update"
  },
  "game": {
   "0061D0B0": "fam_native_strcmpi_game",

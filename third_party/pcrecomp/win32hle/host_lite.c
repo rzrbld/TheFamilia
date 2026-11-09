@@ -207,7 +207,11 @@ static recomp_func_t recomp_lookup_search(uint32_t va) {
     }
     return NULL;
 }
+#define SHIM_RANGE_BASE 0x7F000000u                     /* = SHIM_BASE below */
 recomp_func_t recomp_lookup(uint32_t va) {
+    /* [familia] a shim VA (every COM method of the DirectX shims) is never in the dispatch
+     * table: skip the cache probe and the binary search, recomp_lookup_import follows */
+    if (va >= SHIM_RANGE_BASE) return NULL;
     uint32_t h = (va ^ (va >> 16)) & (LOOKUP_CACHE - 1);
     if (g_lookup_cache[h].va == va && g_lookup_cache[h].fn) return g_lookup_cache[h].fn;
     recomp_func_t f = recomp_lookup_search(va);

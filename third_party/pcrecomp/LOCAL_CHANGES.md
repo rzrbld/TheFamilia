@@ -25,3 +25,5 @@ Every local edit is marked `[familia]` in the source.
 - recomp32/recomp_types.h: fp_push_impl/fp_pop_impl always_inline, fp_recenter cold/noinline [familia]
 - recomp32/recomp_types.h: x87 window position/TOP as function locals under RECOMP_LOCAL_REGS (RECOMP_FP_LOCAL), synced by RECOMP_REGS_OUT/IN [familia]
 - recomp32/recomp_types.h + win32hle/host_lite.c: inline dispatch-cache hit path recomp_lookup_fast in RECOMP_ICALL/ITAIL; manual-override call dropped [familia]
+
+- `win32hle/host_lite.c` `recomp_lookup`: VAs in the shim range (>= 0x7F000000) return NULL at once, so indirect calls into shims skip a failing binary search before `recomp_lookup_import`.

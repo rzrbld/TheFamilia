@@ -167,6 +167,8 @@ void fam_native_init(void) {
         bad += fam_native_rwdata_check();
         int fam_native_anim_check(void);
         bad += fam_native_anim_check();
+        int fam_native_ipol_check(void);
+        bad += fam_native_ipol_check();
         int fam_native_misc_check(void);
         bad += fam_native_misc_check();
         int fam_native_vtx_check(void);
