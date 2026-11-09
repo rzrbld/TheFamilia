@@ -51,5 +51,32 @@
   "fn": "fam_render_splice",
   "exit_fn": "fam_render_splice_exit",
   "what": "I3D_driver::RenderShadowTexture: 2x2 box filter into the 16-bit shadow texture"
+ },
+ {
+  "module": "game",
+  "id": 200,
+  "entry": "00455579",
+  "exit": "00455DF9",
+  "fn": "fam_game_splice",
+  "exit_fn": "fam_game_splice_exit",
+  "what": "C_traffic_element::Tick: scan of the object list for cars (prefetch only)"
+ },
+ {
+  "module": "game",
+  "id": 201,
+  "entry": "004556E1",
+  "exit": "00455DF9",
+  "fn": "fam_game_splice",
+  "exit_fn": "fam_game_splice_exit",
+  "what": "C_traffic_element::Tick: scan of the object list for people (prefetch only)"
+ },
+ {
+  "module": "game",
+  "id": 203,
+  "entry": "00448ABE",
+  "exit": "00448B73",
+  "fn": "fam_game_splice",
+  "exit_fn": "fam_game_splice_exit",
+  "what": "C_ParticleEmitter::Tick: loop over a part's particles (prefetch only)"
  }
 ]

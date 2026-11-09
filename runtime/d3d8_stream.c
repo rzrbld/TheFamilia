@@ -57,7 +57,13 @@ void fam_bind_forget(GLuint b) {          /* a deleted buffer: GL unbinds it */
 void fam_stream_init(void) {
     fam_glDrawRangeElementsBaseVertex = (PFN_rangebv)SDL_GL_GetProcAddress("glDrawRangeElementsBaseVertex");
     if (!fam_glDrawRangeElementsBaseVertex) fam_glDrawRangeElementsBaseVertex = (PFN_rangebv)SDL_GL_GetProcAddress("glDrawRangeElementsBaseVertexEXT");
-    if (!fam_config_int("stream", 1)) { fprintf(stderr, "[stream] off (FAMILIA_STREAM=0)\n"); return; }
+    /* Off by default: with the persistently mapped ring the Mali driver
+     * (H700, libmali r20) allocates memory with the draws that read it and
+     * never frees it (about 0.3 MB/s standing, far more driving; the 1 GB
+     * H700 ran out of memory after half an hour of play). Renewing the buffer
+     * or modifying it through GL did not stop it. FAMILIA_STREAM=1 (the
+     * launcher's "GPU streaming") turns it on: about 2 FPS faster. */
+    if (!fam_config_int("stream", 0)) { fprintf(stderr, "[stream] off (FAMILIA_STREAM=1 turns it on)\n"); return; }
     const char *ext = (const char *)glGetString(GL_EXTENSIONS);
     PFN_storage storage = (PFN_storage)SDL_GL_GetProcAddress("glBufferStorageEXT");
     PFN_map map = (PFN_map)SDL_GL_GetProcAddress("glMapBufferRange");

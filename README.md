@@ -47,8 +47,13 @@ A full playthrough has not been verified yet.
    (about 2 GB, several minutes; keep the handheld charged). You can delete
    `source/` afterwards.
 4. The launcher opens. Set the FPS counter, frame limit, look sensitivity, CPU
-   mode and 32- or 16-bit textures, or view the controller layout, then choose
-   **Save and run**.
+   mode, 32- or 16-bit textures and GPU streaming, or view the controller layout,
+   then choose **Save and run**.
+
+**GPU streaming** (off by default) is about 2 FPS faster, but on the H700's GPU
+driver it makes the driver's memory grow for as long as you play: on a 1 GB
+handheld the game slows down after a while and can freeze within an hour. Turn it
+on only for short sessions.
 
 The game reads the controller as its own gamepad. PortMaster's gptokeyb2 presents
 any handheld's buttons as a standard Xbox 360 pad, so the layout is the same

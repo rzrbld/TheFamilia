@@ -3,6 +3,7 @@
  * prints a line every 5 s with fps, frame-time percentiles and draw counts).
  */
 #include <stdio.h>
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <SDL2/SDL.h>
@@ -216,6 +217,15 @@ void fam_present_hook(void) {
                     hle_vm_ranges(), (hle_vm_reserves - lr) / fr, (hle_vm_releases - lf) / fr, (hle_vm_ns - lns) / 1e6 / fr,
                     fam_tex_alive, fam_buf_alive, (fam_uc_nodes() - lnodes) / fr, fam_sounds_last, (int)(MEM32(0x100C0044u) - fam_fftree_removes), MEM32(0x100C0044u));
             lr = hle_vm_reserves; lf = hle_vm_releases; lns = hle_vm_ns; lnodes = fam_uc_nodes();
+            /* where the memory is: the guest heap's parts, the host's malloc, the process's kinds of pages */
+            extern uint64_t hle_mem_small_carved, hle_mem_small_used, hle_mem_large_live; uint64_t hle_mem_lcache_bytes(void);
+            struct mallinfo2 mi = mallinfo2();
+            char st[2048] = ""; FILE *sf = fopen("/proc/self/status", "r");
+            long anon = -1, file = -1, shm = -1;
+            if (sf) { while (fgets(st, sizeof st, sf)) { sscanf(st, "RssAnon: %ld", &anon); sscanf(st, "RssFile: %ld", &file); sscanf(st, "RssShmem: %ld", &shm); } fclose(sf); }
+            fprintf(stderr, "[mem] guest small %.0f MB carved %.0f MB in use | guest large %.0f MB live, %.0f MB cached | host malloc %.0f MB in use %.0f MB mmapped | rss anon %ld file %ld shmem %ld MB\n",
+                    hle_mem_small_carved / 1048576.0, hle_mem_small_used / 1048576.0, hle_mem_large_live / 1048576.0, hle_mem_lcache_bytes() / 1048576.0,
+                    mi.uordblks / 1048576.0, mi.hblkhd / 1048576.0, anon / 1024, file / 1024, shm / 1024);
         }
         fprintf(stderr, "%.1f fps | frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f | draws/frame %.0f\n",
                 (double)g_window_frames / s, sorted[g_nft / 2], sorted[g_nft * 95 / 100], sorted[g_nft * 99 / 100], sorted[g_nft - 1],

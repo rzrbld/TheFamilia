@@ -244,6 +244,8 @@ void hle_vm_zero(uint32_t va, uint32_t size) {
 #define LARGE      0xFFu
 
 static uint32_t g_free[NCLASS];
+uint64_t hle_mem_small_carved, hle_mem_small_used, hle_mem_large_live;   /* [familia] memory report */
+uint64_t hle_mem_lcache_bytes(void);
 static uint32_t g_carve, g_carve_end;
 
 static uint32_t class_size(int c) {       /* c 0..: 32, 48, 64, 80, 96, 112, 128, 160, 192, ... */
@@ -265,6 +267,7 @@ static uint32_t small_alloc(int c) {
         uint32_t r = vm_reserve_locked(0, CARVE);
         if (!r) return 0;
         g_carve = r, g_carve_end = r + CARVE;
+        hle_mem_small_carved += CARVE;
     }
     va = g_carve;
     g_carve += sz;
@@ -280,6 +283,8 @@ static uint32_t small_alloc(int c) {
 static struct { uint32_t va, span; } g_lcache[LCACHE_N];
 static int g_nlcache;
 static uint64_t g_lcache_bytes;
+static uint32_t range_span(uint32_t va);
+uint64_t hle_mem_lcache_bytes(void) { return g_lcache_bytes; }
 static uint32_t range_span(uint32_t va) {
     int i = rng_ge(va);
     return i < g_nrng && g_rng[i].lo == va ? (uint32_t)(g_rng[i].hi - g_rng[i].lo) : 0;
@@ -311,6 +316,7 @@ void *hle_heap_alloc(uint32_t n, int zero) {
     pthread_mutex_lock(&g_mem_lock);
     va = c >= 0 ? small_alloc(c) : lcache_take(total);
     if (!va && c < 0) va = vm_reserve_locked(0, total);
+    if (va) { if (c >= 0) hle_mem_small_used += class_size(c); else hle_mem_large_live += range_span(va); }
     pthread_mutex_unlock(&g_mem_lock);
     if (!va) return NULL;
     uint32_t *h = (uint32_t *)host(va);
@@ -330,8 +336,8 @@ void hle_heap_free(void *u) {
     uint32_t va = hle_va(h);
     h[1] = 0;
     pthread_mutex_lock(&g_mem_lock);
-    if (h[2] == LARGE) { if (!lcache_put(va)) vm_release_locked(va); }
-    else { *(uint32_t *)u = g_free[h[2]]; g_free[h[2]] = va; }
+    if (h[2] == LARGE) { hle_mem_large_live -= range_span(va); if (!lcache_put(va)) vm_release_locked(va); }
+    else { hle_mem_small_used -= class_size((int)h[2]); *(uint32_t *)u = g_free[h[2]]; g_free[h[2]] = va; }
     pthread_mutex_unlock(&g_mem_lock);
 }
 

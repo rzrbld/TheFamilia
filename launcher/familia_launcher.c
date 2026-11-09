@@ -255,7 +255,7 @@ static int poll_key(void) {
 }
 
 /* ---------------------------------------------------------- settings */
-static int g_fps = 1, g_limit = 0, g_sens = 30, g_cpu_perf = 1, g_tex32 = 1;
+static int g_fps = 1, g_limit = 0, g_sens = 30, g_cpu_perf = 1, g_tex32 = 1, g_stream = 0;
 
 static void cfg_load(void) {
     char p[4200]; snprintf(p, sizeof p, "%s/familia.cfg", g_conf);
@@ -268,6 +268,7 @@ static void cfg_load(void) {
         else if (sscanf(line, "FAMILIA_LOOK_SENS=%d", &v) == 1) g_sens = v;
         else if (!strncmp(line, "FAMILIA_CPU=", 12)) g_cpu_perf = strncmp(line + 12, "system", 6) != 0;
         else if (sscanf(line, "FAMILIA_TEXTURES=%d", &v) == 1) g_tex32 = v != 16;
+        else if (sscanf(line, "FAMILIA_STREAM=%d", &v) == 1) g_stream = v != 0;
     }
     fclose(f);
 }
@@ -275,8 +276,8 @@ static int cfg_save(void) {
     char p[4200], t[4300];
     snprintf(p, sizeof p, "%s/familia.cfg", g_conf); snprintf(t, sizeof t, "%s.new", p);
     FILE *f = fopen(t, "w"); if (!f) return -1;
-    fprintf(f, "# The Familia settings (written by the launcher)\nFAMILIA_FPS=%d\nFAMILIA_LIMIT=%d\nFAMILIA_LOOK_SENS=%d\nFAMILIA_CPU=%s\nFAMILIA_TEXTURES=%d\n",
-            g_fps, g_limit, g_sens, g_cpu_perf ? "perf" : "system", g_tex32 ? 32 : 16);
+    fprintf(f, "# The Familia settings (written by the launcher)\nFAMILIA_FPS=%d\nFAMILIA_LIMIT=%d\nFAMILIA_LOOK_SENS=%d\nFAMILIA_CPU=%s\nFAMILIA_TEXTURES=%d\nFAMILIA_STREAM=%d\n",
+            g_fps, g_limit, g_sens, g_cpu_perf ? "perf" : "system", g_tex32 ? 32 : 16, g_stream);
     if (fclose(f) || rename(t, p)) return -1;
     snprintf(p, sizeof p, "%s/familia.gptk", g_conf);   /* earlier versions' generated keyboard mapping */
     unlink(p);
@@ -316,7 +317,7 @@ static int page_controls(void) {
 }
 
 static int page_settings(void) {
-    enum { S_FPS, S_LIMIT, S_LOOK, S_CPU, S_TEX, S_BIND, S_RUN, S_CANCEL, S_N };
+    enum { S_FPS, S_LIMIT, S_LOOK, S_CPU, S_TEX, S_STREAM, S_BIND, S_RUN, S_CANCEL, S_N };
     int sel = S_RUN;
     for (;;) {
         frame_begin("SETTINGS");
@@ -326,13 +327,14 @@ static int page_settings(void) {
         snprintf(v[S_LOOK], 32, "%d %%", g_sens);
         snprintf(v[S_CPU], 32, "%s", g_cpu_perf ? "1.5 GHz" : "System");
         snprintf(v[S_TEX], 32, "%s", g_tex32 ? "32-bit" : "16-bit");
+        snprintf(v[S_STREAM], 32, "%s", g_stream ? "On" : "Off");
         v[S_BIND][0] = v[S_RUN][0] = v[S_CANCEL][0] = 0;
-        static const char *lab[S_N] = { "FPS counter", "Frame limit", "Look sensitivity", "CPU", "Textures", "Controls...", "Save and run", "Cancel" };
+        static const char *lab[S_N] = { "FPS counter", "Frame limit", "Look sensitivity", "CPU", "Textures", "GPU streaming", "Controls...", "Save and run", "Cancel" };
         for (int i = 0; i < S_N; i++) {
-            int row = 8 + i * 2 + (i >= S_RUN ? 1 : 0);
+            int top = 8 * CELL + i * 30 + (i >= S_RUN ? 12 : 0);    /* nine rows between the title and the note */
             SDL_Color fg = i == sel ? C_HI_FG : C_TEXT;
-            if (i == sel) { SDL_SetRenderDrawColor(R, C_HI_BG.r, C_HI_BG.g, C_HI_BG.b, 255); SDL_Rect b = { 60, row * CELL - 5, W - 120, CELL + 10 }; SDL_RenderFillRect(R, &b); }
-            int h = g_gh[0]['A'] ? g_gh[0]['A'] : 16, y = row * CELL + (CELL - h) / 2 + 1;
+            if (i == sel) { SDL_SetRenderDrawColor(R, C_HI_BG.r, C_HI_BG.g, C_HI_BG.b, 255); SDL_Rect b = { 60, top - 5, W - 120, CELL + 10 }; SDL_RenderFillRect(R, &b); }
+            int h = g_gh[0]['A'] ? g_gh[0]['A'] : 16, y = top + (CELL - h) / 2 + 1;
             text_px(84, y, lab[i], 2, fg);
             if (v[i][0]) {
                 SDL_Color ar = i == sel ? C_HI_FG : C_FRAME;
@@ -341,6 +343,7 @@ static int page_settings(void) {
             }
         }
         note(26, sel == S_TEX ? (g_tex32 ? "32-bit textures: smoother streaming, about +150 MB of RAM" : "16-bit textures: less RAM, more hitches while streaming")
+                 : sel == S_STREAM ? (g_stream ? "On: about +2 FPS, but the GPU driver's memory grows (long sessions)" : "Off: steady memory use for long sessions (recommended)")
                  : sel == S_LOOK ? "Right stick speed (default 30 %). Fine-tune X and Y in the game: Options > Controls"
                  : sel == S_CPU ? "1.5 GHz: performance governor, restored on exit"
                  : sel == S_BIND ? "The controller layout; rebind in the game's Options > Controls"
@@ -359,6 +362,7 @@ static int page_settings(void) {
             if (sel == S_LOOK) { g_sens += d * 5; if (g_sens < 5) g_sens = 5; if (g_sens > 200) g_sens = 200; }
             if (sel == S_CPU) g_cpu_perf = !g_cpu_perf;
             if (sel == S_TEX) g_tex32 = !g_tex32;
+            if (sel == S_STREAM) g_stream = !g_stream;
         }
         if (k == K_A) {
             if (sel == S_BIND) { int r = page_controls(); if (r >= 0) return r; }

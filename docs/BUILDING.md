@@ -76,6 +76,8 @@ Set these in `ports/the_familia/conf/dev.cfg` (a shell fragment that
 | `FAMILIA_PROBE=1` | Function timing probes (`config/probes.json`) in the 5-second stats lines. |
 | `FAMILIA_PROF=1` | Sampling profiler. Read the dumps with `tools/prof_report.py`. |
 | `FAMILIA_MOVIES=0` | Skip the videos. |
+| `FAMILIA_STREAM=1` | GPU streaming ring (the launcher's GPU streaming): faster, but the Mali driver's memory grows. |
+| `FAMILIA_STATS=1` | Performance lines in `log.txt` every 5 s, including where the memory is (`[mem]`). |
 | `FAMILIA_READAHEAD=0` | No learned archive read-ahead (`conf/readahead.txt`); `FAMILIA_READAHEAD_MB` caps it per start (default 256). |
 | `HLE_READTRACE=1` | Log every file read over 2 ms (file, offset, size, time). |
 | `FAMILIA_PAD=0` | No controller (keyboard and mouse only). |

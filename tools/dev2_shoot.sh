@@ -5,6 +5,11 @@ cd "$(dirname "$0")/.."
 D=/mnt/sdcard/ports/the_familia
 # never two games at once: clear anything a previous run left behind, before and after
 KILL='for p in $(pidof familia.aarch64 gptokeyb); do kill -9 $p; done; for p in $(ps -o pid,args | grep "[d]ev-run" | cut -c1-6); do kill $p; done'
+# someone playing on the handheld: leave it alone (FAMILIA_DEV_FORCE=1 clears it anyway)
+if [ -z "${FAMILIA_DEV_FORCE:-}" ] && tools/dev.sh 'pidof familia.aarch64 familia-launcher.aarch64' >/dev/null 2>&1; then
+  echo "dev2_shoot: the game is running on the handheld (someone playing?); not starting (FAMILIA_DEV_FORCE=1 overrides)" >&2
+  exit 3
+fi
 tools/dev.sh "$KILL" >/dev/null 2>&1
 trap 'tools/dev.sh "$KILL" >/dev/null 2>&1' EXIT
 tools/dev.sh "rm -f $D/conf/shot_*.ppm; printf 'FAMILIA_PROBE=1\nFAMILIA_SHOT=$2\nFAMILIA_INPUT_SCRIPT=\"$3\"\n$4\nexport FAMILIA_PROBE FAMILIA_SHOT FAMILIA_INPUT_SCRIPT\n' > $D/conf/dev.cfg; cd $D && timeout -k 5 $(( $1 + 40 )) ./dev-run.sh $1 > /dev/null 2>&1"
