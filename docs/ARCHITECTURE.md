@@ -75,9 +75,14 @@ Pentiums, so the hottest code paths are replaced or reorganised:
   `conf/shaders.bin` and built at startup, starting from the shipped
   `shaders.seed`.
 - **Learned archive read-ahead** (`readahead.c`): the 64 KB blocks of the `.dta` archives the
-  game reads are remembered in `conf/readahead.txt`; at the next start a low-priority thread
-  reads them into the page cache during the menus and loading, so a first drive through the
-  city no longer waits on the SD card (FAT32, about 3 ms per small random read).
+  game reads are remembered per scene in `conf/readahead2.txt` (startup, and each scene behind a
+  loading screen). A low-priority thread reads the startup list into the page cache at start
+  and a scene's list when that scene loads, so a first drive through the city no longer waits
+  on the SD card (FAT32, about 3 ms per small random read).
+- **Memory** (1 GB handhelds): a texture's CPU copy (Direct3D's managed pool keeps one) is
+  dropped once the texture is uploaded and settled, and read back from the GPU if the game
+  ever locks it again (about 110 MB in the city at 32 bits). At each loading screen the guest
+  heap returns the previous scene's freed memory to the system.
 - **File lookups**: directory listings are cached, since LS3D looks for every texture as a
   loose file in each maps directory before reading the archive.
 - **Profile-guided optimisation** of the whole binary (`tools/pgo.sh`).
