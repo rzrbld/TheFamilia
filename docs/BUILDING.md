@@ -79,6 +79,7 @@ Set these in `ports/the_familia/conf/dev.cfg` (a shell fragment that
 | `FAMILIA_STREAM=1` | GPU streaming ring (the launcher's GPU streaming): faster, but the Mali driver's memory grows. |
 | `FAMILIA_STATS=1` | Performance lines in `log.txt` every 5 s, including where the memory is (`[mem]`). |
 | `FAMILIA_READAHEAD=0` | No learned archive read-ahead (`conf/readahead2.txt`); `FAMILIA_READAHEAD_MB` caps it per list (default 256). |
+| `FAMILIA_ENV_EXACT=1` | Cars' reflection coordinates in double precision (exact to the translation) instead of NEON. |
 | `FAMILIA_TEX_EVICT=0` | Keep every texture's CPU copy (by default settled ones are dropped and read back if needed). |
 | `HLE_READTRACE=1` | Log every file read over 2 ms (file, offset, size, time). |
 | `FAMILIA_PAD=0` | No controller (keyboard and mouse only). |

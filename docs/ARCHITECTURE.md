@@ -56,9 +56,11 @@ Pentiums, so the hottest code paths are replaced or reorganised:
   - Each group has a differential self-test against its translated original
     (`FAMILIA_NATIVE_CHECK=1`). A failing test turns off only that group.
   - The native code repeats the translated floating-point model exactly
-    (`-ffp-contract=off`). The one exception is vertex lighting, whose NEON path
-    is within 1/255 per colour channel (`FAMILIA_LIGHT_EXACT=1` selects the exact
-    one).
+    (`-ffp-contract=off`). Two exceptions run in single precision with NEON, as the
+    game itself did on Windows (Direct3D sets the x87 to 24 bits): vertex lighting,
+    within 1/255 per colour channel (`FAMILIA_LIGHT_EXACT=1` selects the exact
+    path), and the cars' environment-map coordinates, within 0.001 of the texture
+    (`FAMILIA_ENV_EXACT=1`).
 - **Loop splicing** (`tools/splice_loops.py`, `config/splices.json`): the pixel
   conversion loops inside `ITexture::Create` are replaced in place, while the rest
   of the function stays translated.
