@@ -40,6 +40,10 @@ struct fam_texture {
     uint32_t gl_wrap_u, gl_wrap_v, gl_min, gl_mag;   /* cached sampler state */
     uint32_t gl_alloc_levels;           /* levels with GL storage (re-uploads use TexSubImage) */
     int has_alpha;
+    /* CPU copies dropped once settled (d3d8_resource.c, tex_evict) */
+    uint64_t touched;                   /* device frame of the last lock, copy or upload */
+    int evicted;                        /* the levels' copies are dropped; read back before use */
+    fam_texture *prev, *next;           /* all textures, for the eviction scan */
 };
 
 typedef struct {

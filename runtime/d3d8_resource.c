@@ -37,8 +37,13 @@ int fam_texture_format_supported(uint32_t usage, uint32_t rtype, uint32_t fmt) {
 }
 
 /* ---------------------------------------------------------- guest memory */
+/* memory report: CPU copies of textures and buffers, and textures locked again after their upload */
+uint64_t fam_tex_bytes, fam_buf_bytes, fam_tex_relocks, fam_tex_relock_ro;
 static uint32_t guest_alloc(uint32_t n) { void *p = hle_heap_alloc(n ? n : 4, 1); return p ? hle_va(p) : 0; }
 static void guest_free(uint32_t va) { if (va) hle_heap_free(hle_ptr(va)); }
+static void tex_link(fam_texture *t);
+static void tex_unlink(fam_texture *t);
+static void tex_restore(fam_texture *t);
 
 fam_texture *fam_texture_of(uint32_t obj) { if (!obj) return NULL; fam_texture *t = fam_com_host(obj); return t && t->kind == FAM_RES_TEXTURE ? t : NULL; }
 fam_surface *fam_surface_of(uint32_t obj) { if (!obj) return NULL; fam_surface *s = fam_com_host(obj); return s && s->kind == FAM_RES_SURFACE ? s : NULL; }
@@ -66,11 +71,14 @@ static void s_GetDesc(void) {                        /* (this, D3DSURFACE_DESC*)
 }
 static void s_LockRect(void) {                       /* (this, D3DLOCKED_RECT*, RECT*, flags) */
     fam_surface *s = fam_surface_of(A32(0));
+    if (s->parent) { if (s->parent->evicted) tex_restore(s->parent); s->parent->touched = g_dev.frame; }
     if (!s->mem) {
         static int once; if (!once++) fprintf(stderr, "[d3d8] LockRect on a non-lockable surface (%ux%u%s)\n",
                                                s->width, s->height, s->is_backbuffer ? ", back buffer" : "");
         RET(D3DERR_INVALIDCALL, 4);
     }
+    { extern uint64_t fam_tex_relocks, fam_tex_relock_ro;
+      if (s->parent && (s->parent->gl_alloc_levels & (1u << s->level))) { fam_tex_relocks++; if (A32(3) & 0x10) fam_tex_relock_ro++; } }
     uint32_t off = 0;
     if (A32(2)) { int32_t *r = APTR(2); const fmt_info *fi = fmt_of(s->format); off = (uint32_t)r[1] * s->pitch + (uint32_t)r[0] * (uint32_t)(fi ? fi->bpp / 8 : 4); }
     MEM32(A32(1)) = s->pitch;
@@ -121,9 +129,12 @@ static void t_CreateTexture(void) {   /* dev (this, w, h, levels, usage, fmt, po
     t->obj = fam_com_new(&Tex_iface, t);
     for (uint32_t i = 0; i < lv; i++) {
         t->lv[i] = surface_new(level_dim(w, i), level_dim(h, i), fmt, usage, pool, 1);
+        fam_tex_bytes += t->lv[i]->size;
         t->lv[i]->parent = t; t->lv[i]->level = (int)i;
     }
     t->dirty_levels = (1u << lv) - 1;
+    t->touched = g_dev.frame;
+    tex_link(t);
     MEM32(A32(7)) = t->obj;
     RET(D3D_OK, 8);
 }
@@ -149,7 +160,10 @@ static void t_LockRect(void) {                       /* (this, level, D3DLOCKED_
     fam_texture *t = fam_texture_of(A32(0));
     uint32_t l = A32(1);
     if (l >= t->levels) RET(D3DERR_INVALIDCALL, 5);
+    if (t->evicted) tex_restore(t);
+    t->touched = g_dev.frame;
     fam_surface *s = t->lv[l];
+    if (t->gl_alloc_levels & (1u << l)) { fam_tex_relocks++; if (A32(4) & 0x10 /* D3DLOCK_READONLY */) fam_tex_relock_ro++; }
     uint32_t off = 0;
     if (A32(3)) { int32_t *r = APTR(3); off = (uint32_t)r[1] * s->pitch + (uint32_t)r[0] * (uint32_t)(fmt_of(s->format)->bpp / 8); }
     MEM32(A32(2)) = s->pitch;
@@ -168,7 +182,8 @@ static void t_Release(void) {
     if (!n) {
         for (int s = 0; s < FAM_MAX_STAGES; s++) if (g_dev.tex[s] == t->obj) g_dev.tex[s] = 0;
         if (t->gl) { fam_texture_unbind_gl(t->gl); glDeleteTextures(1, &t->gl); }
-        for (uint32_t i = 0; i < t->levels; i++) { guest_free(t->lv[i]->mem); hle_com_free(t->lv[i]->obj); free(t->lv[i]); }
+        tex_unlink(t);
+        for (uint32_t i = 0; i < t->levels; i++) { if (t->lv[i]->mem) fam_tex_bytes -= t->lv[i]->size; guest_free(t->lv[i]->mem); hle_com_free(t->lv[i]->obj); free(t->lv[i]); }
         free(t->lv);
         hle_com_free(t->obj);
         free(t);
@@ -190,6 +205,8 @@ static void *conv_buf(size_t n) { if (n > g_conv_cap) { free(g_conv); g_conv = m
 
 static void upload_level(fam_texture *t, uint32_t l) {
     fam_surface *s = t->lv[l];
+    if (t->evicted) tex_restore(t);
+    t->touched = g_dev.frame;
     const uint8_t *src = hle_ptr(s->mem);
     uint32_t w = s->width, h = s->height, n = w * h;
     GLenum ifmt, fmt, type; const void *px = src;
@@ -264,6 +281,7 @@ static void b_new(int kind, fam_iface *it) {   /* dev (this, length, usage, fvf/
     fam_buf_alive++;
     b->kind = kind; b->size = A32(1); b->usage = A32(2); b->fvf_or_format = A32(3); b->pool = A32(4);
     b->mem = guest_alloc(b->size);
+    fam_buf_bytes += b->size;
     b->dirty_lo = 0; b->dirty_hi = b->size;
     b->obj = fam_com_new(it, b);
     MEM32(A32(5)) = b->obj;
@@ -306,7 +324,7 @@ static void b_Release(void) {
         if (g_dev.stream_vb == b->obj) g_dev.stream_vb = 0;
         if (g_dev.ib == b->obj) g_dev.ib = 0;
         if (b->gl) { glDeleteBuffers(1, &b->gl); fam_bind_forget(b->gl); }
-        guest_free(b->mem); hle_com_free(b->obj); free(b);
+        fam_buf_bytes -= b->size; guest_free(b->mem); hle_com_free(b->obj); free(b);
         fam_buf_alive--;
     }
     RET(n, 1);
@@ -382,6 +400,9 @@ static void d_CreateImageSurface(void) {             /* (this, w, h, fmt, surf**
 }
 static void d_CopyRects(void) {                      /* (this, src, srcrects, n, dst, dstpoints) */
     fam_surface *s = fam_surface_of(A32(1)), *d = fam_surface_of(A32(4));
+    if (s && s->parent && s->parent->evicted) tex_restore(s->parent);
+    if (d && d->parent && d->parent->evicted) tex_restore(d->parent);
+    if (d && d->parent) d->parent->touched = g_dev.frame;
     if (!s || !d || !s->mem || !d->mem || s->format != d->format) {
         static int once; if (!once++) fprintf(stderr, "[d3d8] CopyRects between unsupported surfaces\n");
         RET(D3DERR_INVALIDCALL, 6);
@@ -401,10 +422,124 @@ static void d_CopyRects(void) {                      /* (this, src, srcrects, n,
 static void d_UpdateTexture(void) {                  /* (this, srcTex, dstTex) */
     fam_texture *s = fam_texture_of(A32(1)), *d = fam_texture_of(A32(2));
     if (!s || !d) RET(D3DERR_INVALIDCALL, 3);
+    if (s->evicted) tex_restore(s);
+    if (d->evicted) tex_restore(d);
+    d->touched = g_dev.frame;
     for (uint32_t l = 0; l < s->levels && l < d->levels; l++)
         if (s->lv[l]->size == d->lv[l]->size) memcpy(hle_ptr(d->lv[l]->mem), hle_ptr(s->lv[l]->mem), s->lv[l]->size);
     d->dirty_levels = (1u << d->levels) - 1;
     RET(D3D_OK, 3);
+}
+
+/* ---------------------------------------------------------------------------
+ * Dropping settled CPU copies. Like Direct3D's managed pool we keep a CPU copy
+ * of every texture besides the GPU's: about 110 MB in the city at 32 bits.
+ * The game locks textures again only while it loads them, so a texture whose
+ * levels are all uploaded and that nothing touched for EVICT_AGE frames loses
+ * its copy; should the game lock, copy or update it later anyway, the levels
+ * are read back from the GPU first (exact for these formats: a colour
+ * attachment read as RGBA8 and narrowed back). Only colour-renderable formats
+ * of the managed and default pools; SYSTEMMEM textures (the game's staging
+ * copies for UpdateTexture), render targets and dynamic ones keep theirs.
+ * FAMILIA_TEX_EVICT=0 turns it off.
+ * ------------------------------------------------------------------------- */
+#define EVICT_AGE 300u
+uint64_t fam_tex_evicted_bytes, fam_tex_readbacks;
+static fam_texture *g_tex_head, *g_tex_cursor;
+static int g_evict = -1;
+static void tex_link(fam_texture *t) { t->prev = NULL; t->next = g_tex_head; if (g_tex_head) g_tex_head->prev = t; g_tex_head = t; }
+static void tex_unlink(fam_texture *t) {
+    if (g_tex_cursor == t) g_tex_cursor = t->next;
+    if (t->prev) t->prev->next = t->next; else g_tex_head = t->next;
+    if (t->next) t->next->prev = t->prev;
+    t->prev = t->next = NULL;
+}
+static int evictable_format(uint32_t f) {
+    return f == D3DFMT_A8R8G8B8 || f == D3DFMT_X8R8G8B8 || f == D3DFMT_R5G6B5 || f == D3DFMT_A1R5G5B5 ||
+           f == D3DFMT_X1R5G5B5 || f == D3DFMT_A4R4G4B4;
+}
+static void tex_evict_(fam_texture *t);
+static void tex_evict(fam_texture *t) {
+    /* FAMILIA_NATIVE_CHECK=1: the first drops are read back at once and compared with the copy they drop */
+    static int check = -1, left = 40, bad;
+    if (check < 0) { const char *e = getenv("FAMILIA_NATIVE_CHECK"); check = e && atoi(e); }
+    if (!check || left <= 0 || bad) { tex_evict_(t); return; }
+    uint32_t total = 0; for (uint32_t l = 0; l < t->levels; l++) total += t->lv[l]->size;
+    uint8_t *keep = malloc(total), *k = keep;
+    if (!keep) { tex_evict_(t); return; }
+    for (uint32_t l = 0; l < t->levels; l++) { memcpy(k, hle_ptr(t->lv[l]->mem), t->lv[l]->size); k += t->lv[l]->size; }
+    tex_evict_(t);
+    tex_restore(t);
+    fam_tex_readbacks--;
+    k = keep; uint32_t diff = 0;
+    for (uint32_t l = 0; l < t->levels; l++) {
+        const uint8_t *a = k, *r = hle_ptr(t->lv[l]->mem);
+        if (t->format == D3DFMT_X8R8G8B8) { for (uint32_t i = 0; i < t->lv[l]->size; i++) if ((i & 3) != 3 && a[i] != r[i]) diff++; }
+        else if (t->format == D3DFMT_X1R5G5B5) { for (uint32_t i = 0; i < t->lv[l]->size / 2; i++) if ((((const uint16_t *)a)[i] ^ ((const uint16_t *)r)[i]) & 0x7FFF) diff++; }
+        else for (uint32_t i = 0; i < t->lv[l]->size; i++) if (a[i] != r[i]) diff++;
+        k += t->lv[l]->size;
+    }
+    free(keep);
+    left--;
+    if (diff) { bad = 1; g_evict = 0; fprintf(stderr, "[d3d8] texture readback DIFFERS (format %u, %ux%u, %u bytes): copies kept from now on\n", t->format, t->width, t->height, diff); return; }
+    if (left == 39 || left == 0) fprintf(stderr, "[native] texture readback: matches the dropped copy (format %u %ux%u, %d checks left)\n", t->format, t->width, t->height, left);
+    tex_evict_(t);
+}
+static void tex_evict_(fam_texture *t) {
+    for (uint32_t l = 0; l < t->levels; l++) {
+        fam_surface *s = t->lv[l];
+        if (s->mem) { guest_free(s->mem); s->mem = 0; fam_tex_bytes -= s->size; fam_tex_evicted_bytes += s->size; }
+    }
+    t->evicted = 1;
+}
+static GLuint g_rb_fbo;
+static void tex_restore(fam_texture *t) {
+    t->evicted = 0;
+    GLint prev = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+    if (!g_rb_fbo) glGenFramebuffers(1, &g_rb_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_rb_fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    for (uint32_t l = 0; l < t->levels; l++) {
+        fam_surface *s = t->lv[l];
+        if (s->mem) continue;
+        s->mem = guest_alloc(s->size);
+        fam_tex_bytes += s->size; fam_tex_evicted_bytes -= s->size;
+        if (!s->mem) continue;
+        uint32_t w = s->width, h = s->height, n = w * h;
+        uint8_t *px = conv_buf((size_t)n * 4), *dst = hle_ptr(s->mem);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->gl, (GLint)l);
+        glReadPixels(0, 0, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        for (uint32_t i = 0; i < n; i++) {
+            const uint8_t *c = px + i * 4;             /* r g b a */
+            switch (t->format) {
+            case D3DFMT_A8R8G8B8: case D3DFMT_X8R8G8B8:
+                dst[i*4] = c[2]; dst[i*4+1] = c[1]; dst[i*4+2] = c[0]; dst[i*4+3] = t->format == D3DFMT_X8R8G8B8 ? 255 : c[3]; break;
+            case D3DFMT_R5G6B5:
+                ((uint16_t *)dst)[i] = (uint16_t)(((c[0] >> 3) << 11) | ((c[1] >> 2) << 5) | (c[2] >> 3)); break;
+            case D3DFMT_A1R5G5B5: case D3DFMT_X1R5G5B5:
+                ((uint16_t *)dst)[i] = (uint16_t)(((t->format == D3DFMT_X1R5G5B5 || c[3] >= 128) ? 0x8000 : 0) | ((c[0] >> 3) << 10) | ((c[1] >> 3) << 5) | (c[2] >> 3)); break;
+            case D3DFMT_A4R4G4B4:
+                ((uint16_t *)dst)[i] = (uint16_t)(((c[3] >> 4) << 12) | ((c[0] >> 4) << 8) | ((c[1] >> 4) << 4) | (c[2] >> 4)); break;
+            }
+        }
+    }
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev);
+    fam_tex_readbacks++;
+}
+/* at Present: look at a few textures, drop the copies of settled ones */
+void fam_tex_evict_tick(void) {
+    if (g_evict < 0) g_evict = fam_config_int("tex_evict", 1);
+    if (!g_evict) return;
+    for (int k = 0; k < 64; k++) {
+        if (!g_tex_cursor) { g_tex_cursor = g_tex_head; if (!g_tex_cursor) return; }
+        fam_texture *t = g_tex_cursor; g_tex_cursor = t->next;
+        if (t->evicted || !t->gl || t->dirty_levels || t->gl_alloc_levels != (1u << t->levels) - 1u) continue;
+        if (t->pool > 1 || (t->usage & (D3DUSAGE_RENDERTARGET | 0x200 /* DYNAMIC */)) || !evictable_format(t->format)) continue;
+        if (g_dev.frame - t->touched < EVICT_AGE) continue;
+        tex_evict(t);
+    }
 }
 
 void fam_resources_init(void) {

@@ -341,6 +341,33 @@ void hle_heap_free(void *u) {
     pthread_mutex_unlock(&g_mem_lock);
 }
 
+/* [familia] Trim, at a mission change (the previous mission's data has just
+ * been freed): the freed large blocks kept for reuse go back to the system,
+ * and so do the whole pages inside free small blocks of four pages or more
+ * (header and list link stay). Each free block is trimmed once (a mark in its
+ * header's spare word, cleared when it is handed out again). */
+#define TRIM_MARK 0x5452494Du   /* 'TRIM' */
+uint64_t hle_mem_trimmed;
+void hle_heap_trim(void) {
+    hle_mem_init();
+    pthread_mutex_lock(&g_mem_lock);
+    for (int i = 0; i < g_nlcache; i++) vm_release_locked(g_lcache[i].va);
+    g_nlcache = 0; g_lcache_bytes = 0;
+    uint64_t pg = g_host_page;
+    for (int c = 0; c < NCLASS; c++) {
+        uint32_t sz = class_size(c);
+        if (sz < 4 * pg) continue;
+        for (uint32_t va = g_free[c]; va; va = *(uint32_t *)host(va + HDR)) {
+            uint32_t *h = (uint32_t *)host(va);
+            if (h[3] == TRIM_MARK) continue;
+            uint64_t lo = ((uint64_t)va + HDR + 4 + pg - 1) & ~(pg - 1), hi = ((uint64_t)va + sz) & ~(pg - 1);
+            if (hi > lo) { madvise(host((uint32_t)lo), (size_t)(hi - lo), MADV_DONTNEED); hle_mem_trimmed += hi - lo; }
+            h[3] = TRIM_MARK;
+        }
+    }
+    pthread_mutex_unlock(&g_mem_lock);
+}
+
 void *hle_heap_realloc(void *u, uint32_t n, int zero) {
     if (!u) return hle_heap_alloc(n, zero);
     if (!hle_heap_ok(u)) return NULL;

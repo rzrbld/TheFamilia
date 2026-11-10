@@ -60,7 +60,7 @@ static void v_Present(void) {                       /* (this, src, dst, hwnd, di
         extern int fam_glt_on; void fam_glt_swap(void);
         if (fam_glt_on) fam_glt_swap(); else SDL_GL_SwapWindow(g_dev.window);
         extern uint64_t fam_swap_ticks; fam_swap_ticks += SDL_GetPerformanceCounter() - t0; }
-    { void fam_stream_frame(void); fam_stream_frame(); }
+    { void fam_stream_frame(void), fam_tex_evict_tick(void); fam_stream_frame(); fam_tex_evict_tick(); }
     g_dev.frame++;
     RET(D3D_OK, 5);
 }

@@ -11,7 +11,9 @@ if [ -z "${FAMILIA_DEV_FORCE:-}" ] && tools/dev.sh 'pidof familia.aarch64 famili
   exit 3
 fi
 tools/dev.sh "$KILL" >/dev/null 2>&1
-trap 'tools/dev.sh "$KILL" >/dev/null 2>&1' EXIT
+# the run's settings go into conf/dev.cfg: keep the player's and put it back afterwards
+tools/dev.sh "cd $D/conf && { [ -f dev.cfg ] && cp dev.cfg dev.cfg.player || rm -f dev.cfg.player; }" >/dev/null 2>&1
+trap 'tools/dev.sh "$KILL; cd $D/conf && { [ -f dev.cfg.player ] && mv dev.cfg.player dev.cfg || rm -f dev.cfg; }" >/dev/null 2>&1' EXIT
 tools/dev.sh "rm -f $D/conf/shot_*.ppm; printf 'FAMILIA_PROBE=1\nFAMILIA_SHOT=$2\nFAMILIA_INPUT_SCRIPT=\"$3\"\n$4\nexport FAMILIA_PROBE FAMILIA_SHOT FAMILIA_INPUT_SCRIPT\n' > $D/conf/dev.cfg; cd $D && timeout -k 5 $(( $1 + 40 )) ./dev-run.sh $1 > /dev/null 2>&1"
 rm -rf build/shots; mkdir -p build/shots
 tools/dev.sh "cd $D/conf && tar cf - shot_*.ppm 2>/dev/null" | tar xf - -C build/shots 2>/dev/null

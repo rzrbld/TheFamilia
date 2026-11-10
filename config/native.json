@@ -46,6 +46,7 @@
   "00607A60": "fam_native_apply_controls"
  },
  "rw_data": {
-  "110025C0": "fam_native_dta_read"
+  "110025C0": "fam_native_dta_read",
+  "110018A0": "fam_native_dta_open"
  }
 }

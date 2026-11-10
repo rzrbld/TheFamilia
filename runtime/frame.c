@@ -226,6 +226,11 @@ void fam_present_hook(void) {
             fprintf(stderr, "[mem] guest small %.0f MB carved %.0f MB in use | guest large %.0f MB live, %.0f MB cached | host malloc %.0f MB in use %.0f MB mmapped | rss anon %ld file %ld shmem %ld MB\n",
                     hle_mem_small_carved / 1048576.0, hle_mem_small_used / 1048576.0, hle_mem_large_live / 1048576.0, hle_mem_lcache_bytes() / 1048576.0,
                     mi.uordblks / 1048576.0, mi.hblkhd / 1048576.0, anon / 1024, file / 1024, shm / 1024);
+            extern uint64_t fam_tex_bytes, fam_buf_bytes, fam_tex_relocks;
+            extern uint64_t fam_tex_evicted_bytes, fam_tex_readbacks;
+            fprintf(stderr, "[mem] CPU copies: textures %.0f MB (%.0f MB dropped, %llu read back), buffers %.0f MB | textures locked after upload %llu\n",
+                    fam_tex_bytes / 1048576.0, fam_tex_evicted_bytes / 1048576.0, (unsigned long long)fam_tex_readbacks, fam_buf_bytes / 1048576.0,
+                    (unsigned long long)fam_tex_relocks);
         }
         fprintf(stderr, "%.1f fps | frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f | draws/frame %.0f\n",
                 (double)g_window_frames / s, sorted[g_nft / 2], sorted[g_nft * 95 / 100], sorted[g_nft * 99 / 100], sorted[g_nft - 1],
