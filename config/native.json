@@ -44,7 +44,9 @@
   "0040ADD0": "fam_native_svec_mul_f",
   "005C5040": "fam_native_coll_sweep",
   "0055D460": "fam_native_play_logo",
-  "00607A60": "fam_native_apply_controls"
+  "00607A60": "fam_native_apply_controls",
+  "005C66A0": "fam_native_line_in_tree_level_hook",
+  "005C5B20": "fam_native_line_in_aabox_hook"
  },
  "rw_data": {
   "110025C0": "fam_native_dta_read",

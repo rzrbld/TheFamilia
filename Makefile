@@ -59,7 +59,7 @@ $(OUT)/%.o: %.c
 $(OUT)/runtime/movie.o: CFLAGS += -I$(FFMPEG)/include
 
 # native replacements must round exactly like the x87 sequence they replace
-$(OUT)/runtime/native_math.o $(OUT)/runtime/native_frame.o $(OUT)/runtime/native_cull.o $(OUT)/runtime/native_crt.o $(OUT)/runtime/native_vtx.o $(OUT)/runtime/native_light.o $(OUT)/runtime/native_anim.o $(OUT)/runtime/native_ipol.o $(OUT)/runtime/native_misc.o $(OUT)/runtime/native_coll.o $(OUT)/runtime/native_render.o $(OUT)/runtime/native_clip.o: CFLAGS += -ffp-contract=off
+$(OUT)/runtime/native_math.o $(OUT)/runtime/native_frame.o $(OUT)/runtime/native_cull.o $(OUT)/runtime/native_crt.o $(OUT)/runtime/native_vtx.o $(OUT)/runtime/native_light.o $(OUT)/runtime/native_anim.o $(OUT)/runtime/native_ipol.o $(OUT)/runtime/native_misc.o $(OUT)/runtime/native_coll.o $(OUT)/runtime/native_render.o $(OUT)/runtime/native_clip.o $(OUT)/runtime/native_cline.o: CFLAGS += -ffp-contract=off
 
 # the PortMaster launcher (import + settings page)
 launcher: build/familia-launcher.aarch64
