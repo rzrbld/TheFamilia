@@ -35,7 +35,8 @@ A full playthrough has not been verified yet.
 ## Quick start
 
 1. Download `the_familia.zip` from
-   [Releases](https://github.com/rzrbld/TheFamilia/releases). Copy
+   [Releases](https://github.com/rzrbld/TheFamilia/releases) (see
+   [which download](#which-download) below). Copy
    **`The Familia.sh`** into your Ports launcher folder (on muOS, `ROMS/Ports`) and
    the **`the_familia`** folder into `ports` on the same SD card.
 2. Put your own game files into `ports/the_familia/source/` (any letter case):
@@ -81,6 +82,21 @@ inversion. The launcher's **Look sensitivity** sets the right stick's base speed
 Everything the port writes stays in `ports/the_familia/`: saves and settings in
 `conf/`, the log in `log.txt`. Keep `conf/` when updating, and attach `log.txt`
 when you report a problem.
+
+### Which download
+
+Releases come in two builds of the same code:
+
+| Download | Built with | For |
+|---|---|---|
+| `the_familia.zip` | profile-guided optimisation (PGO), trained on an H700 | H700 handhelds (RG40XX, RG35XX series); start here on any device |
+| `the_familia-nopgo.zip` | the same compiler options without the profile | testing on faster handhelds (RK3566/RK3568 and up) |
+
+PGO lays the code out by how often each part runs on the H700, which makes it
+about 10% faster there. On other CPUs that layout may help less or not at all;
+the non-PGO build is there to compare. Both contain the same features and use the
+same saves and settings, so you can switch by extracting the other one over your
+install.
 
 ## Building
 
