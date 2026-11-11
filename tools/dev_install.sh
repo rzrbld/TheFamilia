@@ -6,6 +6,10 @@ set -e
 cd "$(dirname "$0")/.."
 BIN=${1:-build/aarch64/familia}
 D=/mnt/sdcard/ports/the_familia
+H0=${FAMILIA_DEV:?set FAMILIA_DEV}; H0=${H0#*@}
+if [ -f "$HOME/.cache/familia/deny_hosts" ] && grep -qxF "$H0" "$HOME/.cache/familia/deny_hosts"; then
+  echo "dev_install.sh: $H0 is in ~/.cache/familia/deny_hosts: not installing" >&2; exit 97
+fi
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src familia-cross:bookworm aarch64-linux-gnu-strip -o build/dev_install.bin "$BIN"
 H=$(sha256sum build/dev_install.bin | cut -c1-64)
 gzip -1 -c build/dev_install.bin > build/dev_install.bin.gz

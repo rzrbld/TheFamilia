@@ -33,7 +33,8 @@
   "10058540": "fam_native_update_sound",
   "10039280": "fam_native_render_fgroup",
   "1001B500": "fam_native_add_to_fftree",
-  "1001B430": "fam_native_remove_from_fftree"
+  "1001B430": "fam_native_remove_from_fftree",
+  "10002530": "fam_native_clip_faces_persp_hook"
  },
  "game": {
   "0061D0B0": "fam_native_strcmpi_game",

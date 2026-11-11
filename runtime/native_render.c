@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "win32hle.h"
 #include "recomp_types.h"
 
@@ -115,11 +116,62 @@ static void check_end(void) {
 }
 
 static int shadow_filter(void);
+static int projector_loop(void);
+static int clipmesh_loop(void);
 /* the shadow filter's check: native first (kept), restored, then the x86 loop; compared at the exit */
 static int g_sf_left = 50, g_sf_pending;
 static uint32_t g_sf_regs[6], g_sf_lo, g_sf_n;
 static uint8_t *g_sf_out;
+static int g_pl_left = 50, g_pl_pending;
+static uint32_t g_pl_regs[6], g_pl_lo, g_pl_n, g_pl_stack[5];
+static uint8_t *g_pl_out;
+static int g_cm_left = 50, g_cm_pending;
+static uint32_t g_cm_regs[7], g_cm_lo, g_cm_n, g_cm_tmp[3];
+static uint8_t *g_cm_out;
 int fam_render_splice(int id) {
+    if (id == 103) {
+        if (!fam_native_render_on || g_cm_pending) return 0;   /* the x86 loop re-enters its head every vertex */
+        if (g_check < 0) { const char *e = getenv("FAMILIA_NATIVE_CHECK"); g_check = e && atoi(e); }
+        if (!g_check || g_cm_left <= 0) return clipmesh_loop();
+        uint32_t r0[7] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_ebp }, esp = g_esp;
+        uint32_t lo = g_esi, n = g_ebp * 0x14, t0[3];
+        for (int i = 0; i < 3; i++) t0[i] = MEM32(esp + 0x14 + 4 * i);
+        uint8_t *save = malloc(n ? n : 1);
+        g_cm_out = realloc(g_cm_out, n ? n : 1);
+        if (!save || !g_cm_out || !n) { free(save); return clipmesh_loop(); }
+        memcpy(save, (void *)ADDR(lo), n);
+        clipmesh_loop();
+        memcpy(g_cm_out, (void *)ADDR(lo), n);
+        uint32_t r1[7] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_ebp };
+        memcpy(g_cm_regs, r1, sizeof r1);
+        for (int i = 0; i < 3; i++) { g_cm_tmp[i] = MEM32(esp + 0x14 + 4 * i); MEM32(esp + 0x14 + 4 * i) = t0[i]; }
+        memcpy((void *)ADDR(lo), save, n); free(save);
+        g_eax = r0[0]; g_ebx = r0[1]; g_ecx = r0[2]; g_edx = r0[3]; g_esi = r0[4]; g_edi = r0[5]; g_ebp = r0[6];
+        g_cm_lo = lo; g_cm_n = n; g_cm_pending = 1;
+        return 0;                                            /* the x86 loop runs */
+    }
+    if (id == 102) {
+        if (!fam_native_render_on || g_pl_pending) return 0;   /* the x86 loop re-enters its head every vertex */
+        if (g_check < 0) { const char *e = getenv("FAMILIA_NATIVE_CHECK"); g_check = e && atoi(e); }
+        if (!g_check || g_pl_left <= 0) return projector_loop();
+        /* check: the native loop first (kept), state put back, then the x86 loop; compared at the exit */
+        uint32_t r0[6] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi }, esp = g_esp;
+        uint32_t lo = g_ecx, n = g_esi * 0x18, st0[5];
+        for (int i = 0; i < 5; i++) st0[i] = MEM32(esp + 0x10 + 4 * i);
+        uint8_t *save = malloc(n ? n : 1);
+        g_pl_out = realloc(g_pl_out, n ? n : 1);
+        if (!save || !g_pl_out || !n) { free(save); return projector_loop(); }
+        memcpy(save, (void *)ADDR(lo), n);
+        projector_loop();
+        memcpy(g_pl_out, (void *)ADDR(lo), n);
+        uint32_t r1[6] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi };
+        memcpy(g_pl_regs, r1, sizeof r1);
+        for (int i = 0; i < 5; i++) { g_pl_stack[i] = MEM32(esp + 0x10 + 4 * i); MEM32(esp + 0x10 + 4 * i) = st0[i]; }
+        memcpy((void *)ADDR(lo), save, n); free(save);
+        g_eax = r0[0]; g_ebx = r0[1]; g_ecx = r0[2]; g_edx = r0[3]; g_esi = r0[4]; g_edi = r0[5];
+        g_pl_lo = lo; g_pl_n = n; g_pl_pending = 1;
+        return 0;                                            /* the x86 loop runs */
+    }
     if (id == 101) {
         if (!fam_native_render_on) return 0;
         if (g_check < 0) { const char *e = getenv("FAMILIA_NATIVE_CHECK"); g_check = e && atoi(e); }
@@ -139,13 +191,49 @@ int fam_render_splice(int id) {
         g_sf_lo = lo; g_sf_n = n; g_sf_pending = 1;
         return 0;                                            /* the x86 loop runs */
     }
-    if (!fam_native_render_on || id != 100) return 0;
+    if (!fam_native_render_on || id != 100 || g_pending >= 0) return 0;   /* re-entered at its head every sound while checked */
     if (g_check < 0) { const char *e = getenv("FAMILIA_NATIVE_CHECK"); g_check = e && atoi(e); }
     if (g_check && g_check_left > 0) { check_begin(); g_pending = id; return 0; }   /* the translated loop runs */
     sound_pass();
     return 1;
 }
 void fam_render_splice_exit(void) {
+    if (g_cm_pending) {
+        g_cm_pending = 0; g_cm_left--;
+        uint32_t r[7] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_ebp };
+        int bad = memcmp(g_cm_out, (void *)ADDR(g_cm_lo), g_cm_n) != 0, breg = -1;
+        for (int i = 0; i < 7; i++) if (r[i] != g_cm_regs[i]) { bad = 1; if (breg < 0) breg = i; }
+        for (int i = 0; i < 3; i++) if (MEM32(g_esp + 0x14 + 4 * i) != g_cm_tmp[i]) bad = 1;
+        static uint32_t total, largest;
+        if (bad) {
+            uint32_t k = 0; while (k < g_cm_n && g_cm_out[k] == ((uint8_t *)ADDR(g_cm_lo))[k]) k++;
+            fprintf(stderr, "[native] ClipMesh vertex loop MISMATCH (byte %u of %u, register %d): native render loops off\n", k, g_cm_n, breg);
+            fam_native_render_on = 0;
+        } else {
+            total += g_cm_n / 0x14; if (g_cm_n / 0x14 > largest) largest = g_cm_n / 0x14;
+            if (g_cm_left == 0)
+                fprintf(stderr, "[native] ClipMesh vertex loop: matches the x86 loop (50 meshes, %u vertices, largest %u)\n", total, largest);
+        }
+        return;
+    }
+    if (g_pl_pending) {
+        g_pl_pending = 0; g_pl_left--;
+        uint32_t r[6] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi };
+        int bad = memcmp(g_pl_out, (void *)ADDR(g_pl_lo), g_pl_n) != 0;
+        for (int i = 0; i < 6; i++) if (r[i] != g_pl_regs[i]) bad = 1;
+        for (int i = 0; i < 5; i++) if (MEM32(g_esp + 0x10 + 4 * i) != g_pl_stack[i]) bad = 1;
+        if (bad) {
+            uint32_t k = 0; while (k < g_pl_n && g_pl_out[k] == ((uint8_t *)ADDR(g_pl_lo))[k]) k++;
+            fprintf(stderr, "[native] projector vertex loop MISMATCH (first byte %u of %u): native render loops off\n", k, g_pl_n);
+            fam_native_render_on = 0;
+        } else {
+            static uint32_t total, largest;
+            total += g_pl_n / 0x18; if (g_pl_n / 0x18 > largest) largest = g_pl_n / 0x18;
+            if (g_pl_left == 0)
+                fprintf(stderr, "[native] projector vertex loop: matches the x86 loop (50 batches, %u vertices, largest %u)\n", total, largest);
+        }
+        return;
+    }
     if (g_sf_pending) {
         g_sf_pending = 0; g_sf_left--;
         uint32_t r[6] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi };
@@ -478,6 +566,114 @@ void fam_native_render_fgroup(void) {
  * at a time. Registers are left as the x86 loop leaves them.
  * =================================================================== */
 #include <arm_neon.h>
+/* ===================================================================
+ * id 102: I3D_projector::ProcessRecList's output loop for a perspective
+ * projector (0x100475B0 .. 0x10047706, exit to 0x10047CBD): for each clipped
+ * vertex, the position copied, the projection's texture coordinates (near the
+ * projector, z under the engine's epsilon, a side's 0 or 1, both stored in u
+ * as the original does), and the colour faded by depth, packed as the
+ * original packs it. Night scenes project car and street lights onto every
+ * receiver near them: this loop was about 1.5% of a frame there. The x87 is
+ * followed operation for operation (double, float stores, fistp through the
+ * translation's own rounding).
+ *   regs at the head: ecx = output vertex (0x18 bytes), edx = clip result
+ *   (12 bytes), esi = count, ebp = the projector.
+ * =================================================================== */
+static inline double fl(uint32_t va) { float f; memcpy(&f, (const void *)ADDR(va), 4); return f; }
+static inline void sf(uint32_t va, double d) { float f = (float)d; memcpy((void *)ADDR(va), &f, 4); }
+static int projector_loop(void) {
+    uint32_t ecx = g_ecx, edx = g_edx, esi = g_esi, ebp = g_ebp, esp = g_esp;
+    if (!esi) return 0;
+    const double zero = fl(0x1009B310u), one = fl(0x1009B304u), half = fl(0x1009B5B0u), k255 = fl(0x1009B5B4u);
+    const double fade = fl(ebp + 0x1E8), cr = fl(ebp + 0x1EC), cg = fl(ebp + 0x1F0), cb = fl(ebp + 0x1F4);
+    uint32_t eax = 0, ebx = 0, edi = 0;
+    do {
+        MEM32(ecx) = MEM32(edx); ebx = MEM32(edx + 4); MEM32(ecx + 4) = ebx; MEM32(ecx + 8) = MEM32(edx + 8);
+        uint32_t zb = MEM32(edx + 8);
+        MEM32(esp + 0x20) = zb;
+        double x = fl(edx), y = fl(edx + 4), z = fl(edx + 8);
+        if ((int32_t)zb < 0x322BCC77) {
+            sf(ecx + 0x10, (x > zero) ? one : zero);          /* !(x <= 0) */
+            sf(ecx + 0x10, (y > zero) ? zero : one);          /* the original stores this one into u as well */
+        } else {
+            double t = half / z;
+            sf(ecx + 0x10, t * x + half);
+            sf(ecx + 0x14, half - t * y);
+        }
+        double f = (one - z) * fade;
+        sf(esp + 0x10, f);                                   /* fst: the double stays on the stack */
+        if (f > one) MEM32(esp + 0x10) = 0x3F800000u;        /* the double above 1 (NaN is not): 1 */
+        else if (fl(esp + 0x10) < zero) MEM32(esp + 0x10) = 0;   /* the stored float below 0: 0 */
+        double ff = fl(esp + 0x10);
+        sf(esp + 0x1C, ff * cr * k255); MEM32(esp + 0x1C) = (uint32_t)(int32_t)fp_round_cw(fl(esp + 0x1C), g_fpu_cw);
+        sf(esp + 0x18, ff * cg * k255); MEM32(esp + 0x18) = (uint32_t)(int32_t)fp_round_cw(fl(esp + 0x18), g_fpu_cw);
+        sf(esp + 0x14, ff * cb * k255); MEM32(esp + 0x14) = (uint32_t)(int32_t)fp_round_cw(fl(esp + 0x14), g_fpu_cw);
+        eax = MEM32(esp + 0x1C); edi = MEM32(esp + 0x18);
+        eax = ((eax | 0xFFFFFF00u) << 8 | edi) << 8;
+        edi = MEM32(esp + 0x14);
+        eax |= edi;
+        MEM32(ecx + 0xC) = eax;
+        ecx += 0x18; edx += 0xC;
+    } while (--esi);
+    g_eax = eax; g_ebx = ebx; g_ecx = ecx; g_edx = edx; g_esi = 0; g_edi = edi;
+    return 1;
+}
+
+/* ===================================================================
+ * id 103: ClipMesh's perspective vertex loop (0x10003C90 .. 0x10003D95,
+ * exit to 0x10003D99): each vertex of a projector's receiver into the
+ * projection's space (S_vector * S_matrix, bit-exact fam_vmm, called here
+ * directly instead of through the translated call) and its clip code. eax is
+ * kept as the original leaves it, the x87 status word included (the
+ * translation's fnstsw encoding: 0x0100 less, 0x4000 equal, 0 greater,
+ * 0x4500 unordered).
+ *   regs at the head: esi = clip vertex (0x14), edi = mesh vertex (0x20),
+ *   ebp = count, ebx = 0x12; the matrix at [esp+0x20], the call's result
+ *   buffer at [esp+0x14].
+ * =================================================================== */
+void fam_vmm(const float *V, const float *M, float *R);
+static inline uint32_t sw_of(double a, double b) { return (a != a || b != b) ? 0x4500u : a < b ? 0x0100u : a == b ? 0x4000u : 0u; }
+#define SW(e, a, b) ((e) = ((e) & 0xFFFF0000u) | sw_of((a), (b)))
+static int clipmesh_loop(void) {
+    uint32_t esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp, eax = g_eax, ecx = g_ecx, edx = g_edx;
+    if (!ebp) return 0;
+    const uint32_t res = esp + 0x14, mm = esp + 0x20;
+    const double zero = fl(0x1009B310u), one = fl(0x1009B304u);
+    do {
+        float R[3];
+        fam_vmm((const float *)ADDR(edi), (const float *)ADDR(mm), R);
+        memcpy((void *)ADDR(res), R, 12);
+        uint32_t b[3]; memcpy(b, R, 12);
+        MEM32(esi) = b[0]; MEM32(esi + 4) = b[1]; MEM32(esi + 8) = b[2];
+        ecx = esi; edx = b[1]; eax = b[2];
+        double x = R[0], y = R[1], z = R[2], ax = fabs(x), ay = fabs(y);
+        uint32_t c;
+        SW(eax, z, zero);
+        if (z < zero) {                                      /* behind the projector */
+            double nz = -z;
+            c = 0x10;
+            SW(eax, nz, ax);
+            if (nz < ax) { SW(eax, x, zero); c = x < zero ? 0x11 : 0x12; }
+            MEM32(esi + 0x10) = c;
+            SW(eax, nz, ay);
+            if (nz < ay) { SW(eax, y, zero); eax = c | (y < zero ? 4u : 8u); MEM32(esi + 0x10) = eax; }
+        } else {
+            SW(eax, z, one);
+            c = z > one ? 0x20 : 0;
+            MEM32(esi + 0x10) = c;
+            SW(eax, z, ax);
+            if (z < ax) { SW(eax, x, zero); c |= x < zero ? 1u : 2u; eax = c; MEM32(esi + 0x10) = c; }
+            SW(eax, z, ay);
+            if (z < ay) { SW(eax, y, zero); c |= y < zero ? 4u : 8u; eax = c; MEM32(esi + 0x10) = c; }
+        }
+        MEM32(esi + 0xC) = 0xFFFFFFFFu;
+        esi += 0x14; edi += 0x20;
+    } while (--ebp);
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_esi = esi; g_edi = edi; g_ebp = 0;
+    g_ebx = MEM32(esp + 0x10);                               /* 0x10003D95: mov ebx, [esp + 0x10] */
+    return 1;
+}
+
 static int shadow_filter(void) {
     uint32_t ebp = g_ebp, rows = g_ecx, cols = MEM32(ebp + 0xC);
     if (!rows || !cols) return 0;                           /* the x86 loop would count down from 0 */

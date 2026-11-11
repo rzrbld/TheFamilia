@@ -13,7 +13,9 @@ DOCKER="docker run --rm -u $(id -u):$(id -g) -v $PWD:/src -w /src familia-cross:
 rm -rf build/pgo build/pgo-data
 $DOCKER make ARCH=aarch64 OUT=build/pgo PGO=gen -j22
 $DOCKER aarch64-linux-gnu-strip -o build/familia.pgogen build/pgo/familia
-tools/dev.sh "rm -rf $D/pgo; mkdir -p $D/pgo; cat > $D/familia.aarch64.tmp && chmod +x $D/familia.aarch64.tmp && mv $D/familia.aarch64.tmp $D/familia.aarch64" < build/familia.pgogen
+H=$(sha256sum build/familia.pgogen | cut -c1-64)        # checked on the device: an interrupted upload never lands
+gzip -1 -c build/familia.pgogen > build/familia.pgogen.gz
+tools/dev.sh "rm -rf $D/pgo; mkdir -p $D/pgo; gzip -dc > $D/familia.aarch64.tmp && echo '$H  $D/familia.aarch64.tmp' | sha256sum -c - >/dev/null && chmod +x $D/familia.aarch64.tmp && mv $D/familia.aarch64.tmp $D/familia.aarch64" < build/familia.pgogen.gz || { echo "upload failed"; exit 1; }
 # three training sessions, counters added together (gcov merges into the same .gcda):
 # Free Ride standing then driving, mission 1 (night chase), Free Ride driving
 ENV="GCOV_PREFIX=$D/pgo; GCOV_PREFIX_STRIP=0; FAMILIA_GCOV_DUMP=100; FAMILIA_MOVIES=0; export GCOV_PREFIX GCOV_PREFIX_STRIP FAMILIA_GCOV_DUMP FAMILIA_MOVIES"

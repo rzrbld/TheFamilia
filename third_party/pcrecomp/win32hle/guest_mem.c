@@ -341,6 +341,21 @@ void hle_heap_free(void *u) {
     pthread_mutex_unlock(&g_mem_lock);
 }
 
+/* [familia] The end of the large heap block holding va (0 if va is not in one):
+ * for checks that snapshot a whole array. */
+uint32_t hle_heap_block_end(uint32_t va) {
+    pthread_mutex_lock(&g_mem_lock);
+    uint32_t end = 0;
+    int i = rng_ge(va);
+    if (!(i < g_nrng && g_rng[i].lo == va)) i--;                  /* the range starting at or below va */
+    if (i >= 0 && i < g_nrng && g_rng[i].lo <= va && va < g_rng[i].hi) {
+        const uint32_t *h = (const uint32_t *)host((uint32_t)g_rng[i].lo);
+        if (h[1] == MAGIC && h[2] == LARGE) end = (uint32_t)g_rng[i].lo + HDR + h[0];
+    }
+    pthread_mutex_unlock(&g_mem_lock);
+    return end;
+}
+
 /* [familia] Trim, at a mission change (the previous mission's data has just
  * been freed): the freed large blocks kept for reuse go back to the system,
  * and so do the whole pages inside free small blocks of four pages or more

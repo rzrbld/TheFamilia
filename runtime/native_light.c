@@ -278,10 +278,17 @@ typedef struct {
     uint32_t *always, nalways, acap;
     uint32_t *stamp, scap, gen;
 } lcache;
-#define LC_GRID 64
+/* Cells per side (FAMILIA_LC_GRID). 64 made each object walk ~130 mostly
+ * empty cells for ~6 candidates (night, mission 1); 16 walks ~11 for ~6.6, and
+ * the light selection went from about 4.5% to 3% of a night frame. The grid
+ * only proposes candidates (each still gets the exact test, in list order), so
+ * its resolution changes nothing but the time. */
+static int g_lc_grid = -1;
+#define LC_GRID g_lc_grid
 #define LC_MARGIN 1.0f
 static lcache g_lc[4];
 static unsigned g_lc_next;
+static uint64_t g_ls_cand, g_ls_cells, g_ls_rebuilds, g_ls_always;
 static void lc_fill(lcache_e *e, uint32_t light) {
     e->light = light;
     e->mode = MEM32(light + 0x150);
@@ -306,6 +313,7 @@ static void *grow(void *p, uint32_t *cap, uint32_t need, size_t sz) {
     return realloc(p, sz * *cap);
 }
 static void lc_grid(lcache *c) {
+    if (g_lc_grid < 0) { const char *e = getenv("FAMILIA_LC_GRID"); g_lc_grid = e && atoi(e) > 0 ? atoi(e) : 16; }
     c->gw = 0; c->nalways = 0;
     c->always = grow(c->always, &c->acap, c->nl, 4);
     c->stamp = grow(c->stamp, &c->scap, c->nl, 4);
@@ -373,6 +381,7 @@ static uint32_t lc_candidates(lcache *c, double x, double z, double r, uint32_t 
         for (int zz = az; zz <= bz; zz++)
             for (int xx = ax; xx <= bx; xx++) {
                 uint32_t k = (uint32_t)(zz * c->gw + xx);
+                g_ls_cells++;
                 for (uint32_t j = c->cstart[k]; j < c->cstart[k + 1]; j++) {
                     uint32_t i = c->cidx[j];
                     if (c->stamp[i] != c->gen) { c->stamp[i] = c->gen; buf[n++] = i; }
@@ -381,6 +390,7 @@ static uint32_t lc_candidates(lcache *c, double x, double z, double r, uint32_t 
     } else if (c->gw) {                                   /* odd object bounds: every bucketed light */
         for (uint32_t i = 0; i < c->nl; i++) if (c->stamp[i] != c->gen) { c->stamp[i] = c->gen; buf[n++] = i; }
     }
+    g_ls_cand += n; g_ls_always += c->nalways;
     qsort(buf, n, 4, cmp_u32);
     *out = buf;
     return n;
@@ -395,7 +405,14 @@ static lcache *lc_get(uint32_t sector, uint32_t list, uint32_t nl) {
     lcache *c = &g_lc[g_lc_next++ & 3];
     if (c->cap < nl) { free(c->e); c->cap = nl + 64; c->e = malloc(sizeof(lcache_e) * c->cap); }
     if (!c->e) { c->cap = 0; return NULL; }
-    for (uint32_t i = 0; i < nl; i++) lc_fill(&c->e[i], MEM32(list + 4 * i));
+    g_ls_rebuilds++;
+    for (uint32_t i = 0; i < nl; i++) {
+        if (i + 8 < nl) {                                /* the lights a few ahead: their fields' lines */
+            const char *q = (const char *)ADDR(MEM32(list + 4 * (i + 8)));
+            __builtin_prefetch(q + 0x40); __builtin_prefetch(q + 0xA8); __builtin_prefetch(q + 0x150); __builtin_prefetch(q + 0x1D0);
+        }
+        lc_fill(&c->e[i], MEM32(list + 4 * i));
+    }
     c->sector = sector; c->list = list; c->nl = nl; c->changed = ch; c->rnum = rn;
     lc_grid(c);
     return c;
@@ -441,8 +458,9 @@ void fam_native_prepare_lights(void) {
     static int stats = -1; static uint64_t st_calls, st_lights, st_relit, st_verts, st_sel;
     if (stats < 0) { const char *e = getenv("FAMILIA_LIGHT_STATS"); stats = e && atoi(e); }
     if (stats) { st_calls++; st_lights += nl;
-                 if (st_calls % 2000 == 0) fprintf(stderr, "[lightstats] per call: %.1f sector lights, %.2f selected, relit %.0f%%, %.0f verts per relight\n",
-                     (double)st_lights / st_calls, (double)st_sel / st_calls, 100.0 * st_relit / st_calls, st_relit ? (double)st_verts / st_relit : 0.0); }
+                 if (st_calls % 2000 == 0) fprintf(stderr, "[lightstats] per call: %.1f sector lights, %.2f selected, relit %.0f%%, %.0f verts per relight | %.1f candidates (%.1f always), %.1f grid cells per call, %llu rebuilds\n",
+                     (double)st_lights / st_calls, (double)st_sel / st_calls, 100.0 * st_relit / st_calls, st_relit ? (double)st_verts / st_relit : 0.0,
+                     (double)g_ls_cand / st_calls, (double)g_ls_always / st_calls, (double)g_ls_cells / st_calls, (unsigned long long)g_ls_rebuilds); }
     MEM32(G_LCOUNT) = 0;
     uint32_t key = 0;
     uint32_t count = 0;
