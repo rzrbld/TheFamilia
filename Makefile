@@ -38,8 +38,8 @@ GENFLAGS += -fprofile-generate=$(PGO_DIR) -fprofile-update=single
 LIBS += -fprofile-generate=$(PGO_DIR)
 endif
 ifeq ($(PGO),use)
-CFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-partial-training -Wno-missing-profile -Wno-coverage-mismatch
-GENFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-partial-training -Wno-missing-profile -Wno-coverage-mismatch
+CFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-partial-training -fprofile-correction -Wno-missing-profile -Wno-coverage-mismatch
+GENFLAGS += -fprofile-use=$(PGO_DIR) -fprofile-partial-training -fprofile-correction -Wno-missing-profile -Wno-coverage-mismatch
 endif
 
 obj = $(patsubst %.c,$(OUT)/%.o,$(1))
